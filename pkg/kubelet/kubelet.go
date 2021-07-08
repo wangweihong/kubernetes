@@ -819,7 +819,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		return nil, err
 	}
 	klet.pluginManager = pluginmanager.NewPluginManager(
-		klet.getPluginsRegistrationDir(), /* sockDir */
+		klet.getPluginsRegistrationDir(), /* sockDir */ //默认路径/var/lib/kubelet/plugins_regsitry
 		kubeDeps.Recorder,
 	)
 
@@ -1405,12 +1405,12 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 	// and inform container to reopen log file after log rotation.
 	kl.containerLogManager.Start()
 	// Adding Registration Callback function for CSI Driver
-	kl.pluginManager.AddHandler(pluginwatcherapi.CSIPlugin, plugincache.PluginHandler(csi.PluginHandler))
+	kl.pluginManager.AddHandler(pluginwatcherapi.CSIPlugin, plugincache.PluginHandler(csi.PluginHandler)) //添加csi插件的注册处理器
 	// Adding Registration Callback function for Device Manager
-	kl.pluginManager.AddHandler(pluginwatcherapi.DevicePlugin, kl.containerManager.GetPluginRegistrationHandler())
+	kl.pluginManager.AddHandler(pluginwatcherapi.DevicePlugin, kl.containerManager.GetPluginRegistrationHandler()) //添加设备插件的注册处理器
 	// Start the plugin manager
 	klog.V(4).Infof("starting plugin manager")
-	go kl.pluginManager.Run(kl.sourcesReady, wait.NeverStop)
+	go kl.pluginManager.Run(kl.sourcesReady, wait.NeverStop) //异步启动插件控制器, 处理注册的CSI插件以及设备插件
 }
 
 // Run starts the kubelet reacting to config updates

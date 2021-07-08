@@ -60,25 +60,25 @@ const _ = proto.GoGoProtoPackageIsVersion2 // please upgrade the proto package
 // PluginInfo is the message sent from a plugin to the Kubelet pluginwatcher for plugin registration
 type PluginInfo struct {
 	// Type of the Plugin. CSIPlugin or DevicePlugin
-	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"` //插件类型，仅支持CSIPlugin以及DevicePlugin
 	// Plugin name that uniquely identifies the plugin for the given plugin type.
 	// For DevicePlugin, this is the resource name that the plugin manages and
 	// should follow the extended resource name convention.
 	// For CSI, this is the CSI driver registrar name.
-	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` //插件名
 	// Optional endpoint location. If found set by Kubelet component,
 	// Kubelet component will use this endpoint for specific requests.
 	// This allows the plugin to register using one endpoint and possibly use
 	// a different socket for control operations. CSI uses this model to delegate
 	// its registration external from the plugin.
-	Endpoint string `protobuf:"bytes,3,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	Endpoint string `protobuf:"bytes,3,opt,name=endpoint,proto3" json:"endpoint,omitempty"` //插件通信端口
 	// Plugin service API versions the plugin supports.
 	// For DevicePlugin, this maps to the deviceplugin API versions the
 	// plugin supports at the given socket.
 	// The Kubelet component communicating with the plugin should be able
 	// to choose any preferred version from this list, or returns an error
 	// if none of the listed versions is supported.
-	SupportedVersions []string `protobuf:"bytes,4,rep,name=supported_versions,json=supportedVersions" json:"supported_versions,omitempty"`
+	SupportedVersions []string `protobuf:"bytes,4,rep,name=supported_versions,json=supportedVersions" json:"supported_versions,omitempty"` //插件支持的版本列表
 }
 
 func (m *PluginInfo) Reset()                    { *m = PluginInfo{} }
@@ -171,9 +171,16 @@ var _ grpc.ClientConn
 const _ = grpc.SupportPackageIsVersion4
 
 // Client API for Registration service
-
+//所有要注册到 kubelet的插件都要实现这个方法才能够注册插件
+//注： 使用csi sidecar开发的CSI driver不需要实现这个接口是因为node-driver-registar帮开发实现了
 type RegistrationClient interface {
+	//kubelet调用通过插件的socket,向插件获取插件的信息，包括插件名，访问端口，支持的版本，插件类型(CSIPlugin还是DevicePlugin)
 	GetInfo(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*PluginInfo, error)
+	//kubelet会调用这个函数将插件注册的结果告知插件。
+	//失败原因包括：
+	//1. 插件类型不支持
+	//2. 插件版本/插件名/插件端口，插件版本不正确
+	//3. 注册失败。这一步与具体的插件类型相关。
 	NotifyRegistrationStatus(ctx context.Context, in *RegistrationStatus, opts ...grpc.CallOption) (*RegistrationStatusResponse, error)
 }
 

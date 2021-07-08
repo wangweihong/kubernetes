@@ -31,7 +31,9 @@ const (
 
 var (
 	registerMetrics sync.Once
-
+	//记录相关插件的指标
+	//prometheus查询：
+	// plugin_manager_total_plugins{endpoint="https-metrics",instance="10.30.100.149:10250",job="kubelet",metrics_path="/metrics",namespace="kube-system",node="haaaa-10-30-100-149",service="kubelet",socket_path="/var/lib/kubelet/plugins_registry/rbd.csi.ceph.com-reg.sock",state="actual_state_of_world"}
 	totalPluginsDesc = metrics.NewDesc(
 		pluginManagerTotalPlugins,
 		"Number of plugins in Plugin Manager",

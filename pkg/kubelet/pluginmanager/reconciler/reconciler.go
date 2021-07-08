@@ -39,9 +39,13 @@ type Reconciler interface {
 	// if plugins that should be registered are register and plugins that should be
 	// unregistered are unregistered. If not, it will trigger register/unregister
 	// operations to rectify.
+	//每隔1秒时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册，注册仍未注册的插件。
+	//当已注册插件更新时，重新注册该插件。
 	Run(stopCh <-chan struct{})
 
 	// AddHandler adds the given plugin handler for a specific plugin type
+	//添加特定类型的插件的注册处理函数
+	//当前支持两种类型：CSIPlugin以及DevicePlugin
 	AddHandler(pluginType string, pluginHandler cache.PluginHandler)
 }
 
@@ -71,10 +75,11 @@ func NewReconciler(
 }
 
 type reconciler struct {
-	operationExecutor   operationexecutor.OperationExecutor
-	loopSleepDuration   time.Duration
-	desiredStateOfWorld cache.DesiredStateOfWorld
-	actualStateOfWorld  cache.ActualStateOfWorld
+	operationExecutor operationexecutor.OperationExecutor
+	loopSleepDuration time.Duration //调和时间。每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册
+	//注册仍未注册的插件。
+	desiredStateOfWorld cache.DesiredStateOfWorld //期待注册插件表
+	actualStateOfWorld  cache.ActualStateOfWorld  //实际已注册插件表
 	handlers            map[string]cache.PluginHandler
 	sync.RWMutex
 }
@@ -82,10 +87,12 @@ type reconciler struct {
 var _ Reconciler = &reconciler{}
 
 func (rc *reconciler) Run(stopCh <-chan struct{}) {
+	//周期执行（当前间隔为1秒）
 	wait.Until(func() {
-		rc.reconcile()
+		rc.reconcile() //每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册，注册仍未注册的插件。
+		//当已注册插件更新时，重新注册该插件。
 	},
-		rc.loopSleepDuration,
+		rc.loopSleepDuration, // 间隔时间1秒
 		stopCh)
 }
 
@@ -108,7 +115,9 @@ func (rc *reconciler) reconcile() {
 
 	// Ensure plugins that should be unregistered are unregistered.
 	for _, registeredPlugin := range rc.actualStateOfWorld.GetRegisteredPlugins() {
+		//表明指定插件是否需要取消注册
 		unregisterPlugin := false
+		// 实际已注册的插件，并没有在期待插件注册表中，则应该取消当前的插件的注册
 		if !rc.desiredStateOfWorld.PluginExists(registeredPlugin.SocketPath) {
 			unregisterPlugin = true
 		} else {
@@ -116,6 +125,7 @@ func (rc *reconciler) reconcile() {
 			// and desired state of world cache, but the timestamps don't match.
 			// Iterate through desired state of world plugins and see if there's any plugin
 			// with the same socket path but different timestamp.
+			//同名插件在实际已注册表的注册时间比期望注册表中时间更早, 说明插件已经更新。则应取消该插件的注册。
 			for _, dswPlugin := range rc.desiredStateOfWorld.GetPluginsToRegister() {
 				if dswPlugin.SocketPath == registeredPlugin.SocketPath && dswPlugin.Timestamp != registeredPlugin.Timestamp {
 					klog.V(5).Infof(registeredPlugin.GenerateMsgDetailed("An updated version of plugin has been found, unregistering the plugin first before reregistering", ""))
@@ -142,6 +152,7 @@ func (rc *reconciler) reconcile() {
 	}
 
 	// Ensure plugins that should be registered are registered
+	// 注册期待注册表中的插件
 	for _, pluginToRegister := range rc.desiredStateOfWorld.GetPluginsToRegister() {
 		if !rc.actualStateOfWorld.PluginExistsWithCorrectTimestamp(pluginToRegister) {
 			klog.V(5).Infof(pluginToRegister.GenerateMsgDetailed("Starting operationExecutor.RegisterPlugin", ""))

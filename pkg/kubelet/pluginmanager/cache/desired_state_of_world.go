@@ -32,11 +32,12 @@ import (
 // plugin manager's desired state of the world cache.
 // This cache contains a map of socket file path to plugin information of
 // all plugins attached to this node.
+// 这里就是一个带读写锁的map, 用来记录期待注册的插件表
 type DesiredStateOfWorld interface {
 	// AddOrUpdatePlugin add the given plugin in the cache if it doesn't already exist.
 	// If it does exist in the cache, then the timestamp of the PluginInfo object in the cache will be updated.
 	// An error will be returned if socketPath is empty.
-	AddOrUpdatePlugin(socketPath string) error
+	AddOrUpdatePlugin(socketPath string) error //将socket path添加到表中,并更新添加时间
 
 	// RemovePlugin deletes the plugin with the given socket path from the desired
 	// state of world.

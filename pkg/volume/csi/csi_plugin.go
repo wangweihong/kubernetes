@@ -56,7 +56,7 @@ const (
 
 	// CsiResyncPeriod is default resync period duration
 	// TODO: increase to something useful
-	CsiResyncPeriod = time.Minute
+	CsiResyncPeriod = time.Minute  //这个同步时间？
 )
 
 type csiPlugin struct {
@@ -91,14 +91,14 @@ var nim nodeinfomanager.Interface
 
 // PluginHandler is the plugin registration handler interface passed to the
 // pluginwatcher module in kubelet
-var PluginHandler = &RegistrationHandler{}
+var PluginHandler = &RegistrationHandler{} //csi插件注册器。用于处理新的csi driver注册
 
 // ValidatePlugin is called by kubelet's plugin watcher upon detection
 // of a new registration socket opened by CSI Driver registrar side car.
 func (h *RegistrationHandler) ValidatePlugin(pluginName string, endpoint string, versions []string) error {
 	klog.Infof(log("Trying to validate a new CSI Driver with name: %s endpoint: %s versions: %s",
 		pluginName, endpoint, strings.Join(versions, ",")))
-
+	//检测插件版本是否兼容，插件是否已经注册。
 	_, err := h.validateVersions("ValidatePlugin", pluginName, endpoint, versions)
 	if err != nil {
 		return fmt.Errorf("validation failed for CSI Driver %s at endpoint %s: %v", pluginName, endpoint, err)
@@ -118,12 +118,14 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 
 	// Storing endpoint of newly registered CSI driver into the map, where CSI driver name will be the key
 	// all other CSI components will be able to get the actual socket of CSI drivers by its name.
+	//保存注册的CSI插件到CSI驱动表中。
 	csiDrivers.Set(pluginName, Driver{
 		endpoint:                endpoint,
 		highestSupportedVersion: highestSupportedVersion,
 	})
 
 	// Get node info from the driver.
+	//建立与CSI驱动的客户端
 	csi, err := newCsiDriverClient(csiDriverName(pluginName))
 	if err != nil {
 		return err
@@ -132,6 +134,7 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 	ctx, cancel := context.WithTimeout(context.Background(), csiTimeout)
 	defer cancel()
 
+	//获取CSI驱动的节点信息
 	driverNodeID, maxVolumePerNode, accessibleTopology, err := csi.NodeGetInfo(ctx)
 	if err != nil {
 		if unregErr := unregisterDriver(pluginName); unregErr != nil {
@@ -151,6 +154,7 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 	return nil
 }
 
+//检测同名的驱动是否已经存在更高版本的存在
 func (h *RegistrationHandler) validateVersions(callerName, pluginName string, endpoint string, versions []string) (*utilversion.Version, error) {
 	if len(versions) == 0 {
 		return nil, errors.New(log("%s for CSI driver %q failed. Plugin returned an empty list for supported versions", callerName, pluginName))
@@ -161,8 +165,8 @@ func (h *RegistrationHandler) validateVersions(callerName, pluginName string, en
 	if err != nil {
 		return nil, errors.New(log("%s for CSI driver %q failed. None of the versions specified %q are supported. err=%v", callerName, pluginName, versions, err))
 	}
-
-	existingDriver, driverExists := csiDrivers.Get(pluginName)
+	//插件是否已经注册l
+	existingDriver, driverExists := csiDrivers.Get(puginName)l
 	if driverExists {
 		if !existingDriver.highestSupportedVersion.LessThan(newDriverHighestVersion) {
 			return nil, errors.New(log("%s for CSI driver %q failed. Another driver with the same name is already registered with a higher supported version: %q", callerName, pluginName, existingDriver.highestSupportedVersion))

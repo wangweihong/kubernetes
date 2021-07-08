@@ -33,14 +33,17 @@ import (
 
 // Watcher is the plugin watcher
 type Watcher struct {
-	path                string
+	path                string // 插件注册目录 /var/lib/kubelet/plugins_regsitry
 	fs                  utilfs.Filesystem
 	fsWatcher           *fsnotify.Watcher
 	stopped             chan struct{}
-	desiredStateOfWorld cache.DesiredStateOfWorld
+	desiredStateOfWorld cache.DesiredStateOfWorld //当path路径(以及子路径)下存在非'.'前缀的unix domain socket文件时将该socket
+	//文件添加到desiredStateOfWorld表中
 }
 
 // NewWatcher provides a new watcher for socket registration
+// 用来监听/var/lib/kubelet/plugins_registry目录(以及子目录树), 当存在非"."前缀的unix domain socket文件时
+// 将该socket信息添加到desiredStateOfWorld表中
 func NewWatcher(sockDir string, desiredStateOfWorld cache.DesiredStateOfWorld) *Watcher {
 	return &Watcher{
 		path:                sockDir,
@@ -57,6 +60,7 @@ func (w *Watcher) Start(stopCh <-chan struct{}) error {
 
 	// Creating the directory to be watched if it doesn't exist yet,
 	// and walks through the directory to discover the existing plugins.
+	// 创建监听目录，如果监听目录不存在的话
 	if err := w.init(); err != nil {
 		return err
 	}
@@ -71,7 +75,7 @@ func (w *Watcher) Start(stopCh <-chan struct{}) error {
 	if err := w.traversePluginDir(w.path); err != nil {
 		klog.Errorf("failed to traverse plugin socket path %q, err: %v", w.path, err)
 	}
-
+	//添加监听事件处理器
 	go func(fsWatcher *fsnotify.Watcher) {
 		defer close(w.stopped)
 		for {
@@ -79,6 +83,10 @@ func (w *Watcher) Start(stopCh <-chan struct{}) error {
 			case event := <-fsWatcher.Events:
 				//TODO: Handle errors by taking corrective measures
 				if event.Op&fsnotify.Create == fsnotify.Create {
+					//1. 当创建的是.为前缀的文件，直接忽略
+					//2. 当创建的是unix domain socket文件， 则添加socket文件到desiredStateOfWorld表中
+					//3. 当创建的是目录, 则递归遍历目录树，如果其中有unix domain socket文件，创建一个fsnotify create事件触发
+					// handleCreateEvent。
 					err := w.handleCreateEvent(event)
 					if err != nil {
 						klog.Errorf("error %v when handling create event: %s", err, event)
@@ -110,6 +118,7 @@ func (w *Watcher) Start(stopCh <-chan struct{}) error {
 	return nil
 }
 
+//创建监听目录，如果不存在的话
 func (w *Watcher) init() error {
 	klog.V(4).Infof("Ensuring Plugin directory at %s ", w.path)
 
@@ -134,10 +143,12 @@ func (w *Watcher) traversePluginDir(dir string) error {
 		}
 
 		switch mode := info.Mode(); {
+		//如果是目录，加入到监控
 		case mode.IsDir():
 			if err := w.fsWatcher.Add(path); err != nil {
 				return fmt.Errorf("failed to watch %s, err: %v", path, err)
 			}
+			//如果是unix domain socket, 将socket信息记录到desiredStateOfWorld表中。
 		case mode&os.ModeSocket != 0:
 			event := fsnotify.Event{
 				Name: path,
@@ -160,22 +171,24 @@ func (w *Watcher) traversePluginDir(dir string) error {
 // - MUST NOT start with a '.'
 func (w *Watcher) handleCreateEvent(event fsnotify.Event) error {
 	klog.V(6).Infof("Handling create event: %v", event)
-
+	// 创建的文件信息
 	fi, err := os.Stat(event.Name)
 	if err != nil {
 		return fmt.Errorf("stat file %s failed: %v", event.Name, err)
 	}
-
+	// 忽略前缀带.的文件(隐藏文件)
 	if strings.HasPrefix(fi.Name(), ".") {
 		klog.V(5).Infof("Ignoring file (starts with '.'): %s", fi.Name())
 		return nil
 	}
-
+	// 如果不是目录
 	if !fi.IsDir() {
+		// 创建的文件是不是unix domain socket文件
 		isSocket, err := util.IsUnixDomainSocket(util.NormalizePath(event.Name))
 		if err != nil {
 			return fmt.Errorf("failed to determine if file: %s is a unix domain socket: %v", event.Name, err)
 		}
+		// 忽略非unix domain socket文件
 		if !isSocket {
 			klog.V(5).Infof("Ignoring non socket file %s", fi.Name())
 			return nil
@@ -183,7 +196,7 @@ func (w *Watcher) handleCreateEvent(event fsnotify.Event) error {
 
 		return w.handlePluginRegistration(event.Name)
 	}
-
+	//如果是目录, 则递归遍历目录。如果子目录存在unix socket文件时，创建一个文件创建事件来触发监听器来处理
 	return w.traversePluginDir(event.Name)
 }
 
@@ -205,6 +218,7 @@ func (w *Watcher) handlePluginRegistration(socketPath string) error {
 	return nil
 }
 
+// 将指定的插件socket移除出desiredStateOfWorld
 func (w *Watcher) handleDeleteEvent(event fsnotify.Event) {
 	klog.V(6).Infof("Handling delete event: %v", event)
 

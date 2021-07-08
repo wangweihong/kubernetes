@@ -32,6 +32,7 @@ import (
 // plugin manager's actual state of the world cache.
 // This cache contains a map of socket file path to plugin information of
 // all plugins attached to this node.
+// 这里就是一个带读写锁的map, 记录实际上已注册的插件
 type ActualStateOfWorld interface {
 
 	// GetRegisteredPlugins generates and returns a list of plugins
@@ -61,7 +62,7 @@ type ActualStateOfWorld interface {
 // NewActualStateOfWorld returns a new instance of ActualStateOfWorld
 func NewActualStateOfWorld() ActualStateOfWorld {
 	return &actualStateOfWorld{
-		socketFileToInfo: make(map[string]PluginInfo),
+		socketFileToInfo: make(map[string]PluginInfo), //key是插件的socket
 	}
 }
 
@@ -77,8 +78,8 @@ var _ ActualStateOfWorld = &actualStateOfWorld{}
 
 // PluginInfo holds information of a plugin
 type PluginInfo struct {
-	SocketPath string
-	Timestamp  time.Time
+	SocketPath string    // 插件unix domain socket的路径
+	Timestamp  time.Time // 插件注册时间.当同名插件在期望注册表中的注册时间比实际已注册表的时间更新时，将会认为插件已更新，从而导致插件卸载后重新注册
 	Handler    PluginHandler
 	Name       string
 }

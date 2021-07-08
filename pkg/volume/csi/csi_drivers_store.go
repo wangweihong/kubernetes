@@ -25,13 +25,14 @@ import (
 // Driver is a description of a CSI Driver, defined by an enpoint and the
 // highest CSI version supported
 type Driver struct {
-	endpoint                string
-	highestSupportedVersion *utilversion.Version
+	endpoint                string               //驱动的访问端点， 这个端点和驱动注册的unix domain socket可以不是同一个
+	highestSupportedVersion *utilversion.Version //最高支持版本
 }
 
 // DriversStore holds a list of CSI Drivers
+// 读写锁表，用于保存已注册的CSI插件的信息。
 type DriversStore struct {
-	store
+	store //在插件注册时，保存注册的插件名以及插件信息。key为插件名
 	sync.RWMutex
 }
 

@@ -34,13 +34,13 @@ import (
 // need to be registered/deregistered and makes it so.
 type PluginManager interface {
 	// Starts the plugin manager and all the asynchronous loops that it controls
-	Run(sourcesReady config.SourcesReady, stopCh <-chan struct{})
+	Run(sourcesReady config.SourcesReady, stopCh <-chan struct{}) // 异步监听插件注册目录/var/lib/kubelet/plugins_registry, 注册未注册的插件或者重注册已更新的插件。
 
 	// AddHandler adds the given plugin handler for a specific plugin type, which
 	// will be added to the actual state of world cache so that it can be passed to
 	// the desired state of world cache in order to be used during plugin
 	// registration/deregistration
-	AddHandler(pluginType string, pluginHandler cache.PluginHandler)
+	AddHandler(pluginType string, pluginHandler cache.PluginHandler) //添加插件类型的注册处理函数，当前支持CSIPlugin以及DevicePlugin.
 }
 
 const (
@@ -54,26 +54,26 @@ const (
 func NewPluginManager(
 	sockDir string,
 	recorder record.EventRecorder) PluginManager {
-	asw := cache.NewActualStateOfWorld()
-	dsw := cache.NewDesiredStateOfWorld()
-	reconciler := reconciler.NewReconciler(
+	asw := cache.NewActualStateOfWorld()    // 实际已注册插件表
+	dsw := cache.NewDesiredStateOfWorld()   // 期待注册插件表
+	reconciler := reconciler.NewReconciler( //调和器。 比对实际已注册查检表以及期待注册查检表，移除不再期待注册的插件，注册期待的注册插件。
 		operationexecutor.NewOperationExecutor(
 			operationexecutor.NewOperationGenerator(
 				recorder,
 			),
 		),
-		loopSleepDuration,
+		loopSleepDuration, //调和器调和间隔时间，默认1秒。
 		dsw,
 		asw,
 	)
 
 	pm := &pluginManager{
 		desiredStateOfWorldPopulator: pluginwatcher.NewWatcher(
-			sockDir,
-			dsw,
+			sockDir, // 路径/var/lib/kubelet/plugins_regsitry
+			dsw,     //记录以上目录树unix domain socket文件信息
 		),
 		reconciler:          reconciler,
-		desiredStateOfWorld: dsw,
+		desiredStateOfWorld: dsw, // 每当/var/lib/kubelet/plugins_regsitry目录树有非"."的unix domain socket文件将会添加到该表
 		actualStateOfWorld:  asw,
 	}
 	return pm
@@ -83,31 +83,33 @@ func NewPluginManager(
 type pluginManager struct {
 	// desiredStateOfWorldPopulator (the plugin watcher) runs an asynchronous
 	// periodic loop to populate the desiredStateOfWorld.
-	desiredStateOfWorldPopulator *pluginwatcher.Watcher
+	desiredStateOfWorldPopulator *pluginwatcher.Watcher // 插件注册目录监视器/var/lib/kubelet/plugins_registry以及子目录中非
+	// '.'前缀的unix domain socket文件，会添加到期待注册插件表中
 
 	// reconciler runs an asynchronous periodic loop to reconcile the
 	// desiredStateOfWorld with the actualStateOfWorld by triggering register
 	// and unregister operations using the operationExecutor.
-	reconciler reconciler.Reconciler
+	reconciler reconciler.Reconciler // 调和器。 比对实际已注册查检表以及期待注册查检表，移除不再期待注册的插件，注册期待的注册插件。
 
 	// actualStateOfWorld is a data structure containing the actual state of
 	// the world according to the manager: i.e. which plugins are registered.
 	// The data structure is populated upon successful completion of register
 	// and unregister actions triggered by the reconciler.
-	actualStateOfWorld cache.ActualStateOfWorld
+	actualStateOfWorld cache.ActualStateOfWorld // 实际已注册插件表
 
 	// desiredStateOfWorld is a data structure containing the desired state of
 	// the world according to the plugin manager: i.e. what plugins are registered.
 	// The data structure is populated by the desired state of the world
 	// populator (plugin watcher).
-	desiredStateOfWorld cache.DesiredStateOfWorld
+	desiredStateOfWorld cache.DesiredStateOfWorld //期待注册插件表
 }
 
 var _ PluginManager = &pluginManager{}
 
 func (pm *pluginManager) Run(sourcesReady config.SourcesReady, stopCh <-chan struct{}) {
 	defer runtime.HandleCrash()
-
+	// 启动fsnotify监听目录/var/lib/kubelet/plugins_registry以及子目录树, 一旦有非'.'的unix domain socket存在或者刚创建的
+	// socket信息将保存到pluginManager.desiredStateOfWorld表中
 	pm.desiredStateOfWorldPopulator.Start(stopCh)
 	klog.V(2).Infof("The desired_state_of_world populator (plugin watcher) starts")
 
@@ -119,6 +121,8 @@ func (pm *pluginManager) Run(sourcesReady config.SourcesReady, stopCh <-chan str
 	klog.Infof("Shutting down Kubelet Plugin Manager")
 }
 
+//添加不同类型的插件的注册处理函数。
+//当前支持两种类型：CSIPlugin以及DevicePlugin
 func (pm *pluginManager) AddHandler(pluginType string, handler cache.PluginHandler) {
 	pm.reconciler.AddHandler(pluginType, handler)
 }

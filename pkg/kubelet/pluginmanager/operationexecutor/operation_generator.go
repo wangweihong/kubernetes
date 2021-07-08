@@ -84,14 +84,18 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 		}
 		defer conn.Close()
 
+		//与插件socket建立连接
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
+		//获取插件信息
+		//注册的插件都需要实现k8s.io\kubelet\pkg\apis\pluginregistration\v1\api.pb.go的RegistrationClient里面的方法
+		//注意：在开发CSI driver不需要实现，是因为CSI sidecar容器node-driver-registar已经帮助开发者实现了该接口。
 		infoResp, err := client.GetInfo(ctx, &registerapi.InfoRequest{})
 		if err != nil {
 			return fmt.Errorf("RegisterPlugin error -- failed to get plugin info using RPC GetInfo at socket %s, err: %v", socketPath, err)
 		}
-
+		//获取插件类型对应的注册处理函数. CSIPlugin还是DevicePlugin.
 		handler, ok := pluginHandlers[infoResp.Type]
 		if !ok {
 			if err := og.notifyPlugin(client, false, fmt.Sprintf("RegisterPlugin error -- no handler registered for plugin type: %s at socket %s", infoResp.Type, socketPath)); err != nil {
@@ -99,10 +103,12 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 			}
 			return fmt.Errorf("RegisterPlugin error -- no handler registered for plugin type: %s at socket %s", infoResp.Type, socketPath)
 		}
-
+		//获得插件的访问端点, 插件的注册端点和通信端点可以不一样
 		if infoResp.Endpoint == "" {
 			infoResp.Endpoint = socketPath
 		}
+
+		//校验插件是否合法
 		if err := handler.ValidatePlugin(infoResp.Name, infoResp.Endpoint, infoResp.SupportedVersions); err != nil {
 			if err = og.notifyPlugin(client, false, fmt.Sprintf("RegisterPlugin error -- plugin validation failed with err: %v", err)); err != nil {
 				return fmt.Errorf("RegisterPlugin error -- failed to send error at socket %s, err: %v", socketPath, err)
@@ -161,7 +167,7 @@ func (og *operationGenerator) notifyPlugin(client registerapi.RegistrationClient
 		PluginRegistered: registered,
 		Error:            errStr,
 	}
-
+	//告知插件的注册状态
 	if _, err := client.NotifyRegistrationStatus(ctx, status); err != nil {
 		return errors.Wrap(err, errStr)
 	}
