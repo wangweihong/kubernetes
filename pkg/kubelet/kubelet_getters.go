@@ -55,6 +55,7 @@ func (kl *Kubelet) getPodsDir() string {
 // directories are created.  Plugins can use these directories for data that
 // they need to persist.  Plugins should create subdirectories under this named
 // after their own names.
+// /var/lib/kubelet/plugins
 func (kl *Kubelet) getPluginsDir() string {
 	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPluginsDirName)
 }
@@ -63,6 +64,7 @@ func (kl *Kubelet) getPluginsDir() string {
 // plugins socket should be placed to be registered.
 // More information is available about plugin registration in the pluginwatcher
 // module
+// 插件注册目录, /var/lib/kubelet/plugins_registry
 func (kl *Kubelet) getPluginsRegistrationDir() string {
 	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPluginsRegistrationDirName)
 }

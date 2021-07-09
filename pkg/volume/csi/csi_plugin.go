@@ -56,7 +56,7 @@ const (
 
 	// CsiResyncPeriod is default resync period duration
 	// TODO: increase to something useful
-	CsiResyncPeriod = time.Minute  //这个同步时间？
+	CsiResyncPeriod = time.Minute
 )
 
 type csiPlugin struct {
@@ -165,8 +165,8 @@ func (h *RegistrationHandler) validateVersions(callerName, pluginName string, en
 	if err != nil {
 		return nil, errors.New(log("%s for CSI driver %q failed. None of the versions specified %q are supported. err=%v", callerName, pluginName, versions, err))
 	}
-	//插件是否已经注册l
-	existingDriver, driverExists := csiDrivers.Get(puginName)l
+	//插件是否已经注册
+	existingDriver, driverExists := csiDrivers.Get(pluginName)
 	if driverExists {
 		if !existingDriver.highestSupportedVersion.LessThan(newDriverHighestVersion) {
 			return nil, errors.New(log("%s for CSI driver %q failed. Another driver with the same name is already registered with a higher supported version: %q", callerName, pluginName, existingDriver.highestSupportedVersion))

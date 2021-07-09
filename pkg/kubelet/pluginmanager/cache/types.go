@@ -51,6 +51,7 @@ type PluginHandler interface {
 	//plugin注册时必须实现k8s.io\kubelet\pkg\apis\pluginregistration\v1.RegistrationClient
 	//通过RegistrationClient.GetInfo()已经获得插件的名字/支持版本/类型/访问端点等信息。
 	//得知以上信息后才调用ValidatePlugin进行验证。
+	//CSIPlugin: 检测是否由同名的插件已注册，如果已注册，比较当前期待注册的插件与已注册的插件的版本。如果校验失败，告知插件注册失败。
 	ValidatePlugin(pluginName string, endpoint string, versions []string) error
 	// RegisterPlugin is called so that the plugin can be register by any
 	// plugin consumer

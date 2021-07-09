@@ -68,12 +68,12 @@ type ActualStateOfWorldUpdater interface {
 	// AddPlugin add the given plugin in the cache if no existing plugin
 	// in the cache has the same socket path.
 	// An error will be returned if socketPath is empty.
-	AddPlugin(pluginInfo cache.PluginInfo) error
+	AddPlugin(pluginInfo cache.PluginInfo) error //添加注册的插件到实际注册表中，该插件的信息已经知道
 
 	// RemovePlugin deletes the plugin with the given socket path from the actual
 	// state of world.
 	// If a plugin does not exist with the given socket path, this is a no-op.
-	RemovePlugin(socketPath string)
+	RemovePlugin(socketPath string) //
 }
 
 type operationExecutor struct {

@@ -819,7 +819,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		return nil, err
 	}
 	klet.pluginManager = pluginmanager.NewPluginManager(
-		klet.getPluginsRegistrationDir(), /* sockDir */ //默认路径/var/lib/kubelet/plugins_regsitry
+		klet.getPluginsRegistrationDir(), /* sockDir */ //默认路径/var/lib/kubelet/plugins_regsitry, 在该目录树下创建非“."的socket文件将认为是注册插件
 		kubeDeps.Recorder,
 	)
 
@@ -1251,8 +1251,11 @@ type Kubelet struct {
 // 3.  the plugins directory
 // 4.  the pod-resources directory
 func (kl *Kubelet) setupDataDirs() error {
+	// /var/lib/kubelet
 	kl.rootDirectory = path.Clean(kl.rootDirectory)
+	// 插件注册目录 /var/lib/kubelet/plugins_registry
 	pluginRegistrationDir := kl.getPluginsRegistrationDir()
+	// 插件目录 /var/lib/kubelet/plugins
 	pluginsDir := kl.getPluginsDir()
 	if err := os.MkdirAll(kl.getRootDir(), 0750); err != nil {
 		return fmt.Errorf("error creating root directory: %v", err)
@@ -1405,7 +1408,10 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 	// and inform container to reopen log file after log rotation.
 	kl.containerLogManager.Start()
 	// Adding Registration Callback function for CSI Driver
-	kl.pluginManager.AddHandler(pluginwatcherapi.CSIPlugin, plugincache.PluginHandler(csi.PluginHandler)) //添加csi插件的注册处理器
+	//添加csi插件的注册处理器，在插件注册后，会根据插件类型继续相应的处理
+	// 如CSIPlugin:
+	// 1. 在插件注册时，pluginHandler会和插件通信调用csi.NodeGetInfo()获取插件的拓扑/单节点最大卷数/节点ID等信息
+	kl.pluginManager.AddHandler(pluginwatcherapi.CSIPlugin, plugincache.PluginHandler(csi.PluginHandler))
 	// Adding Registration Callback function for Device Manager
 	kl.pluginManager.AddHandler(pluginwatcherapi.DevicePlugin, kl.containerManager.GetPluginRegistrationHandler()) //添加设备插件的注册处理器
 	// Start the plugin manager
@@ -2225,6 +2231,7 @@ func (kl *Kubelet) updateRuntimeUp() {
 		return
 	}
 	kl.runtimeState.setRuntimeState(nil)
+	//保证只会执行一次
 	kl.oneTimeInitializer.Do(kl.initializeRuntimeDependentModules)
 	kl.runtimeState.setRuntimeSync(kl.clock.Now())
 }

@@ -99,6 +99,7 @@ func NewInitializedVolumePluginMgr(
 var _ volume.VolumeHost = &kubeletVolumeHost{}
 var _ volume.KubeletVolumeHost = &kubeletVolumeHost{}
 
+//获得指定插件的数据目录 /var/lib/kubelet/plugins/<pluginName>
 func (kvh *kubeletVolumeHost) GetPluginDir(pluginName string) string {
 	return kvh.kubelet.getPluginDir(pluginName)
 }

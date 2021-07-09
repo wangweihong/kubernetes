@@ -78,17 +78,17 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 	actualStateOfWorldUpdater ActualStateOfWorldUpdater) func() error {
 
 	registerPluginFunc := func() error {
+		//通过注册socket与插件通信
 		client, conn, err := dial(socketPath, dialTimeoutDuration)
 		if err != nil {
 			return fmt.Errorf("RegisterPlugin error -- dial failed at socket %s, err: %v", socketPath, err)
 		}
 		defer conn.Close()
 
-		//与插件socket建立连接
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
-		//获取插件信息
+		//通过注册socket来获取插件基本信息，如插件类型（CSIPlugin还是DevicePlugin),名字，通信socket以及版本列表
 		//注册的插件都需要实现k8s.io\kubelet\pkg\apis\pluginregistration\v1\api.pb.go的RegistrationClient里面的方法
 		//注意：在开发CSI driver不需要实现，是因为CSI sidecar容器node-driver-registar已经帮助开发者实现了该接口。
 		infoResp, err := client.GetInfo(ctx, &registerapi.InfoRequest{})
@@ -98,18 +98,20 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 		//获取插件类型对应的注册处理函数. CSIPlugin还是DevicePlugin.
 		handler, ok := pluginHandlers[infoResp.Type]
 		if !ok {
+			//调用插件的注册socket, 告知插件注册失败。
 			if err := og.notifyPlugin(client, false, fmt.Sprintf("RegisterPlugin error -- no handler registered for plugin type: %s at socket %s", infoResp.Type, socketPath)); err != nil {
 				return fmt.Errorf("RegisterPlugin error -- failed to send error at socket %s, err: %v", socketPath, err)
 			}
 			return fmt.Errorf("RegisterPlugin error -- no handler registered for plugin type: %s at socket %s", infoResp.Type, socketPath)
 		}
-		//获得插件的访问端点, 插件的注册端点和通信端点可以不一样
+		//获得插件的通信端点, 插件的注册socket和通信socket可以不一样
 		if infoResp.Endpoint == "" {
 			infoResp.Endpoint = socketPath
 		}
 
 		//校验插件是否合法
 		if err := handler.ValidatePlugin(infoResp.Name, infoResp.Endpoint, infoResp.SupportedVersions); err != nil {
+			//调用插件的注册socket, 告知插件注册失败。
 			if err = og.notifyPlugin(client, false, fmt.Sprintf("RegisterPlugin error -- plugin validation failed with err: %v", err)); err != nil {
 				return fmt.Errorf("RegisterPlugin error -- failed to send error at socket %s, err: %v", socketPath, err)
 			}
@@ -117,16 +119,20 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 		}
 		// We add the plugin to the actual state of world cache before calling a plugin consumer's Register handle
 		// so that if we receive a delete event during Register Plugin, we can process it as a DeRegister call.
+		// 添加插件到plugin manager的实际已注册查检表中
 		err = actualStateOfWorldUpdater.AddPlugin(cache.PluginInfo{
-			SocketPath: socketPath,
-			Timestamp:  timestamp,
-			Handler:    handler,
-			Name:       infoResp.Name,
+			SocketPath: socketPath,    // 注册socket
+			Timestamp:  timestamp,     // 注册时间
+			Handler:    handler,       // 插件注册/移除注册的回调函数
+			Name:       infoResp.Name, // 插件名
 		})
 		if err != nil {
 			klog.Errorf("RegisterPlugin error -- failed to add plugin at socket %s, err: %v", socketPath, err)
 		}
 		if err := handler.RegisterPlugin(infoResp.Name, infoResp.Endpoint, infoResp.SupportedVersions); err != nil {
+			//调用插件的注册socket, 告知插件注册失败。
+			//CSIPlugin：如果使用了node-driver-registrar, 通知注册失败的结果会导致node-driver-registrar退出, 程序退出时会移除注册socket。
+			//    移除注册socket文件后，pluginManager的Watcher会将该插件移除出期待注册表。在plugin manager的Reconciler调和时，会将该插件从实际注册表中移除。
 			return og.notifyPlugin(client, false, fmt.Sprintf("RegisterPlugin error -- plugin registration failed with err: %v", err))
 		}
 
@@ -149,6 +155,7 @@ func (og *operationGenerator) GenerateUnregisterPluginFunc(
 		}
 		// We remove the plugin to the actual state of world cache before calling a plugin consumer's Unregister handle
 		// so that if we receive a register event during Register Plugin, we can process it as a Register call.
+		// 将插件从实际注册表中移除。
 		actualStateOfWorldUpdater.RemovePlugin(pluginInfo.SocketPath)
 
 		pluginInfo.Handler.DeRegisterPlugin(pluginInfo.Name)
@@ -159,6 +166,9 @@ func (og *operationGenerator) GenerateUnregisterPluginFunc(
 	return unregisterPluginFunc
 }
 
+//告知插件其注册的结果。插件得到通知后可能会出现以下的结果：
+//CSIPlugin：如果使用了node-driver-registrar, 通知注册失败的结果会导致node-driver-registrar退出, 程序退出时会移除注册socket。
+//    移除注册socket文件后，pluginManager的Watcher会将该插件移除出期待注册表。在plugin manager的Reconciler调和时，会将该插件从实际注册表中移除。
 func (og *operationGenerator) notifyPlugin(client registerapi.RegistrationClient, registered bool, errStr string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeoutDuration)
 	defer cancel()

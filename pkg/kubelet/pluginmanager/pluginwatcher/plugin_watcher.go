@@ -36,9 +36,9 @@ type Watcher struct {
 	path                string // 插件注册目录 /var/lib/kubelet/plugins_regsitry
 	fs                  utilfs.Filesystem
 	fsWatcher           *fsnotify.Watcher
-	stopped             chan struct{}
+	stopped             chan struct{}             //停止监控
 	desiredStateOfWorld cache.DesiredStateOfWorld //当path路径(以及子路径)下存在非'.'前缀的unix domain socket文件时将该socket
-	//文件添加到desiredStateOfWorld表中
+	//文件添加到desiredStateOfWorld表中。 只有当该socket文案及能从监听目录中移除后，才会从desiredStateOfWorld移除。
 }
 
 // NewWatcher provides a new watcher for socket registration
@@ -53,6 +53,7 @@ func NewWatcher(sockDir string, desiredStateOfWorld cache.DesiredStateOfWorld) *
 }
 
 // Start watches for the creation and deletion of plugin sockets at the path
+//监控插件注册目录树，当有新的非"." unix domain socket创建时，将会添加新的插件到期待注册表中。
 func (w *Watcher) Start(stopCh <-chan struct{}) error {
 	klog.V(2).Infof("Plugin Watcher Start at %s", w.path)
 
@@ -200,6 +201,7 @@ func (w *Watcher) handleCreateEvent(event fsnotify.Event) error {
 	return w.traversePluginDir(event.Name)
 }
 
+// 将新注册的插件信息添加到期待注册表desiredStateOfWorld中。
 func (w *Watcher) handlePluginRegistration(socketPath string) error {
 	if runtime.GOOS == "windows" {
 		socketPath = util.NormalizePath(socketPath)

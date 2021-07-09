@@ -75,19 +75,19 @@ func NewReconciler(
 }
 
 type reconciler struct {
-	operationExecutor operationexecutor.OperationExecutor
-	loopSleepDuration time.Duration //调和时间。每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册
+	operationExecutor operationexecutor.OperationExecutor //插件注册
+	loopSleepDuration time.Duration                       //调和时间。每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册
 	//注册仍未注册的插件。
-	desiredStateOfWorld cache.DesiredStateOfWorld //期待注册插件表
-	actualStateOfWorld  cache.ActualStateOfWorld  //实际已注册插件表
-	handlers            map[string]cache.PluginHandler
+	desiredStateOfWorld cache.DesiredStateOfWorld      //期待注册插件表
+	actualStateOfWorld  cache.ActualStateOfWorld       //实际已注册插件表
+	handlers            map[string]cache.PluginHandler //不同类型插件的注册处理函数
 	sync.RWMutex
 }
 
 var _ Reconciler = &reconciler{}
 
 func (rc *reconciler) Run(stopCh <-chan struct{}) {
-	//周期执行（当前间隔为1秒）
+	//周期执行（当前间隔为1秒），但只有上一次调和结束，才会执行下一次调和
 	wait.Until(func() {
 		rc.reconcile() //每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册，注册仍未注册的插件。
 		//当已注册插件更新时，重新注册该插件。
@@ -96,6 +96,8 @@ func (rc *reconciler) Run(stopCh <-chan struct{}) {
 		stopCh)
 }
 
+//添加不同类型插件的注册/取消注册处理函数
+//目前只支持CSIPlugin以及DevicePlugin
 func (rc *reconciler) AddHandler(pluginType string, pluginHandler cache.PluginHandler) {
 	rc.Lock()
 	defer rc.Unlock()
@@ -114,6 +116,8 @@ func (rc *reconciler) reconcile() {
 	// Unregisterations are triggered before registrations
 
 	// Ensure plugins that should be unregistered are unregistered.
+	//1. 先移除实际注册表中存在，但在期待注册表中已经没有的插件
+	//2. 移除实际/期待注册表中都存在，但期待注册的时间比实际注册的时间晚（很可能插件已经更新）
 	for _, registeredPlugin := range rc.actualStateOfWorld.GetRegisteredPlugins() {
 		//表明指定插件是否需要取消注册
 		unregisterPlugin := false
@@ -152,10 +156,12 @@ func (rc *reconciler) reconcile() {
 	}
 
 	// Ensure plugins that should be registered are registered
-	// 注册期待注册表中的插件
+	// 注册期待注册表中的仍未注册到实际注册表中的插件
 	for _, pluginToRegister := range rc.desiredStateOfWorld.GetPluginsToRegister() {
+		//如果期待注册的插件不存在实际注册表，同时
 		if !rc.actualStateOfWorld.PluginExistsWithCorrectTimestamp(pluginToRegister) {
 			klog.V(5).Infof(pluginToRegister.GenerateMsgDetailed("Starting operationExecutor.RegisterPlugin", ""))
+			//如果注册成功，插件信息会添加到实际注册表中。**注册失败后，将会通知插件注册失败**
 			err := rc.operationExecutor.RegisterPlugin(pluginToRegister.SocketPath, pluginToRegister.Timestamp, rc.getHandlers(), rc.actualStateOfWorld)
 			if err != nil &&
 				!goroutinemap.IsAlreadyExists(err) &&
