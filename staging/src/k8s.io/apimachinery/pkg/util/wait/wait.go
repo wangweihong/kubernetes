@@ -217,49 +217,49 @@ func runConditionWithCrashProtection(condition ConditionFunc) (bool, error) {
 }
 
 // Backoff holds parameters applied to a Backoff function.
-//回避。
+//退避。
 type Backoff struct {
 	// The initial duration.
-	Duration time.Duration //回避时间基础值。每次回避，都会根据因数Factor来计算出新的回避时间。这个值不受Jitter影响。如果超过了上限
-	//则使用上限值作为基础值，后续回避就不再更新回避基础值
+	Duration time.Duration //退避时间基础值。每次退避，都会根据因数Factor来计算出新的退避基础值。这个值不受Jitter影响。如果超过了上限
+	//则使用上限值作为基础值，后续退避就不再更新退避基础值
 	// Duration is multiplied by factor each iteration, if factor is not zero
 	// and the limits imposed by Steps and Cap have not been reached.
 	// Should not be negative.
 	// The jitter does not contribute to the updates to the duration parameter.
-	Factor float64 //因数。 如果因数不为0，计算下一次回避时间时间为上一次回避时间*Factor
+	Factor float64 //因数。 如果因数不为0，计算下一次退避时间基础值为上一次退避时间基础值*Factor
 	// The sleep at each iteration is the duration plus an additional
 	// amount chosen uniformly at random from the interval between
 	// zero and `jitter*duration`.
-	Jitter float64 //误差值。当设置了这个值，将会在[上一次回避时间: 上一次回避时间+上一次回避时间*Jitter]生成一个随机值作为新的回避时间
+	Jitter float64 //误差值。当设置了这个值，将会在[退避基础值, 退避基础值+退避基础值*b.Jitter]生成一个随机值作为新的退避时间
 	// The remaining number of iterations in which the duration
 	// parameter may change (but progress can be stopped earlier by
 	// hitting the cap). If not positive, the duration is not
 	// changed. Used for exponential backoff in combination with
 	// Factor and Cap.
-	Steps int //回避基础值的剩余次数计算。等低于1时，不再更新回避基础值
+	Steps int //退避基础值的剩余更新次数。等低于1时，不再更新退避基础值
 	// A limit on revised values of the duration parameter. If a
 	// multiplication by the factor parameter would make the duration
 	// exceed the cap then the duration is set to the cap and the
 	// steps parameter is set to zero.
-	Cap time.Duration //回避基础值上限，当计算出的回避基础值超过改值时，将会使用该值作为回避回避基础值。后续回避基础值则不再更新。
+	Cap time.Duration //退避基础值上限，当计算出的退避基础值超过改值时，将会使用该值作为退避退避基础值。后续退避基础值则不再更新。
 }
 
 // Step (1) returns an amount of time to sleep determined by the
 // original Duration and Jitter and (2) mutates the provided Backoff
 // to update its Steps and Duration.
-// 算出回避的时长。
-// 1. 如果设置了Factor, 每次回避时间基础值为上一次回避时间基础值*Factor
-// 2. 如果设置了Jitter(误差）， 步骤1计算的时间[回避时间基础值, 回避时间基础值+jitter*回避时间基础值]中取一个随机作为回避时间。误差不影响基础值
-// 3. 如果设置了回避上限，当新的回避时间基础值超过回避上限时，回避基础值设置为回避上限，不再更新回避基础值。仅通过计算误差和回避基础值作为新的回避时长。
+// 算出退避的时长。
+// 1. 如果设置了Factor, 每次退避时间基础值为上一次退避时间基础值*Factor
+// 2. 如果设置了Jitter(误差）， 步骤1计算的时间[退避时间基础值, 退避时间基础值+jitter*退避时间基础值]中取一个随机作为退避时间。误差不影响基础值
+// 3. 如果设置了退避上限，当新的退避时间基础值超过退避上限时，退避基础值设置为退避上限，不再更新退避基础值。仅通过计算误差和退避基础值作为新的退避时长。
 func (b *Backoff) Step() time.Duration {
-	//步进小于1，不再计算新的回避基础值
+	//步进小于1，不再计算新的退避基础值
 	if b.Steps < 1 {
 		//如果设置了误差
 		if b.Jitter > 0 {
-			//根据误差值，算出[回避基础值, 回避基础值+回避基础值*b.Jitter]的一个随机值作为回避时长
+			//根据误差值，算出[退避基础值, 退避基础值+退避基础值*b.Jitter]的一个随机值作为退避时长
 			return Jitter(b.Duration, b.Jitter)
 		}
-		// 返回回避基础值作为回避时长
+		// 返回退避基础值作为退避时长
 		return b.Duration
 	}
 	//步进减一
@@ -268,19 +268,19 @@ func (b *Backoff) Step() time.Duration {
 	duration := b.Duration
 
 	// calculate the next step
-	// 算出下一次回避基础值
+	// 算出下一次退避基础值
 	if b.Factor != 0 {
-		//计算下一次回避基础值
+		//计算下一次退避基础值
 		b.Duration = time.Duration(float64(b.Duration) * b.Factor)
 
-		// 回避时间上限，当计算出的回避基础值超过改值时，将会使用该值作为新的回避基础值。
-		// 下一次步进就不再更新回避基础值。
+		// 退避时间上限，当计算出的退避基础值超过改值时，将会使用该值作为新的退避基础值。
+		// 下一次步进就不再更新退避基础值。
 		if b.Cap > 0 && b.Duration > b.Cap {
 			b.Duration = b.Cap
 			b.Steps = 0
 		}
 	}
-	//根据误差值，算出[回避基础值,回避基础值+回避基础值*b.Jitter]的一个随机值作为回避时间
+	//根据误差值，算出[退避基础值,退避基础值+退避基础值*b.Jitter]的一个随机值作为退避时间
 	if b.Jitter > 0 {
 		duration = Jitter(duration, b.Jitter)
 	}
@@ -416,13 +416,15 @@ func (j *jitteredBackoffManagerImpl) Backoff() clock.Timer {
 // In case (1) the returned error is what the condition function returned.
 // In all other cases, ErrWaitTimeout is returned.
 func ExponentialBackoff(backoff Backoff, condition ConditionFunc) error {
-	//如果设置了回避的步进次数
+	//如果设置了退避的步进次数
+	//设置step为1，执行一次就退出
+	//最多循环step-1次
 	for backoff.Steps > 0 {
 		//执行预设函数
 		if ok, err := runConditionWithCrashProtection(condition); err != nil || ok {
 			return err
 		}
-		// 当回避剩余次数为1时，退出。报告超时
+		// 当退避步进次数为1时，退出。报告超时
 		if backoff.Steps == 1 {
 			break
 		}
