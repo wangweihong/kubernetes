@@ -230,7 +230,9 @@ type Backoff struct {
 	// The sleep at each iteration is the duration plus an additional
 	// amount chosen uniformly at random from the interval between
 	// zero and `jitter*duration`.
-	Jitter float64 //误差值。当设置了这个值，将会在[退避基础值, 退避基础值+退避基础值*b.Jitter]生成一个随机值作为新的退避时间
+	Jitter float64 //误差值。当设置了这个值，将会在[退避基础值, 退避基础值+退避基础值*Jitter]生成一个随机值作为新的退避时间
+	//误差值的用处：假若有10个线程要执行同一个逻辑，假若相同时间内执行会因冲突失败而进行重试。因为同样的逻辑，失败线程会同样
+	//的时间睡眠后再起来执行同样的逻辑，这样唤醒至少有n-1绝对会失败。如果有误差，失败线程唤醒的时间就大概率不一样就不会触发冲突。
 	// The remaining number of iterations in which the duration
 	// parameter may change (but progress can be stopped earlier by
 	// hitting the cap). If not positive, the duration is not
