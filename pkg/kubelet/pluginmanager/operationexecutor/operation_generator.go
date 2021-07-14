@@ -137,6 +137,7 @@ func (og *operationGenerator) GenerateRegisterPluginFunc(
 		}
 
 		// Notify is called after register to guarantee that even if notify throws an error Register will always be called after validate
+		// 通知插件注册成功
 		if err := og.notifyPlugin(client, true, ""); err != nil {
 			return fmt.Errorf("RegisterPlugin error -- failed to send registration status at socket %s, err: %v", socketPath, err)
 		}

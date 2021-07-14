@@ -78,9 +78,12 @@ type reconciler struct {
 	operationExecutor operationexecutor.OperationExecutor //插件注册
 	loopSleepDuration time.Duration                       //调和时间。每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册
 	//注册仍未注册的插件。
-	desiredStateOfWorld cache.DesiredStateOfWorld      //期待注册插件表
-	actualStateOfWorld  cache.ActualStateOfWorld       //实际已注册插件表
-	handlers            map[string]cache.PluginHandler //不同类型插件的注册处理函数
+	desiredStateOfWorld cache.DesiredStateOfWorld //期待注册插件表。 当由非”."前缀的socket在/var/lib/kubelet/plugin_registry创建时，就会添加一条插件注册信息到该表。
+	actualStateOfWorld  cache.ActualStateOfWorld  //实际已注册插件表。 在调和过程中，当通过GetInfo()接口获取到插件的信息时，将插件添加到该表中。
+	//即使插件注册失败，reconciler不会将插件从该表中移除。而是通知插件注册失败的消息。由插件注册
+	//关闭掉注册socket后，在下一次调和过程中才将注册插件移除。
+	handlers map[string]cache.PluginHandler //不同类型插件的注册处理函数。目前仅有CSIPlugin以及DevicePlugin.
+	//包含插件的校验，注册以及取消注册三个功能。
 	sync.RWMutex
 }
 
@@ -90,14 +93,14 @@ func (rc *reconciler) Run(stopCh <-chan struct{}) {
 	//周期执行（当前间隔为1秒），但只有上一次调和结束，才会执行下一次调和
 	wait.Until(func() {
 		rc.reconcile() //每隔该时间进行比对期待注册表和实际注册表, 取消不存在期待注册表中的已注册插件的注册，注册仍未注册的插件。
-		//当已注册插件更新时，重新注册该插件。
+		//当已注册插件更新时，也会取消已注册的插件，然后重新注册该插件。
 	},
 		rc.loopSleepDuration, // 间隔时间1秒
 		stopCh)
 }
 
 //添加不同类型插件的注册/取消注册处理函数
-//目前只支持CSIPlugin以及DevicePlugin
+//目前只支持CSIPlugin以及DevicePlugin两种类型插件
 func (rc *reconciler) AddHandler(pluginType string, pluginHandler cache.PluginHandler) {
 	rc.Lock()
 	defer rc.Unlock()
@@ -158,7 +161,8 @@ func (rc *reconciler) reconcile() {
 	// Ensure plugins that should be registered are registered
 	// 注册期待注册表中的仍未注册到实际注册表中的插件
 	for _, pluginToRegister := range rc.desiredStateOfWorld.GetPluginsToRegister() {
-		//如果期待注册的插件不存在实际注册表，同时
+		//如果相同注册时间的期待注册插件不存在于实际注册表中则尝试注册
+		//如果期待注册插件已经实际注册，且时间相同, 则不做任何处理。
 		if !rc.actualStateOfWorld.PluginExistsWithCorrectTimestamp(pluginToRegister) {
 			klog.V(5).Infof(pluginToRegister.GenerateMsgDetailed("Starting operationExecutor.RegisterPlugin", ""))
 			//如果注册成功，插件信息会添加到实际注册表中。**注册失败后，将会通知插件注册失败**

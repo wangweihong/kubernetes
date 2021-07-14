@@ -329,7 +329,7 @@ type BlockVolumePlugin interface {
 type KubeletVolumeHost interface {
 	// SetKubeletError lets plugins set an error on the Kubelet runtime status
 	// that will cause the Kubelet to post NotReady status with the error message provided
-	SetKubeletError(err error)
+	SetKubeletError(err error) //设置kubelet运行时存储错误
 
 	// GetInformerFactory returns the informer factory for CSIDriverLister
 	GetInformerFactory() informers.SharedInformerFactory
@@ -360,6 +360,7 @@ type AttachDetachVolumeHost interface {
 }
 
 // VolumeHost is an interface that plugins can use to access the kubelet.
+// 这个接口有几种实现：kubelet的volume.KubeletVolumeHost， controllerManager.AttachDetachController.
 type VolumeHost interface {
 	// GetPluginDir returns the absolute path to a directory under which
 	// a given plugin may store data.  This directory might not actually
@@ -396,6 +397,7 @@ type VolumeHost interface {
 	GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string
 
 	// GetKubeClient returns a client interface
+	// 获取apiserver通信客户端
 	GetKubeClient() clientset.Interface
 
 	// NewWrapperMounter finds an appropriate plugin with which to handle
@@ -583,6 +585,7 @@ func NewSpecFromPersistentVolume(pv *v1.PersistentVolume, readOnly bool) *Spec {
 // InitPlugins initializes each plugin.  All plugins must have unique names.
 // This must be called exactly once before any New* methods are called on any
 // plugins.
+// 注意这个接口即被Kubelet调用，也被ControllerManager调用
 func (pm *VolumePluginMgr) InitPlugins(plugins []VolumePlugin, prober DynamicPluginProber, host VolumeHost) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -610,6 +613,7 @@ func (pm *VolumePluginMgr) InitPlugins(plugins []VolumePlugin, prober DynamicPlu
 	}
 
 	allErrs := []error{}
+	//遍历所有管理的插件(CSI,local以及其他内置卷插件)，进行初始化
 	for _, plugin := range plugins {
 		name := plugin.GetPluginName()
 		if errs := validation.IsQualifiedName(name); len(errs) != 0 {
@@ -621,6 +625,7 @@ func (pm *VolumePluginMgr) InitPlugins(plugins []VolumePlugin, prober DynamicPlu
 			allErrs = append(allErrs, fmt.Errorf("volume plugin %q was registered more than once", name))
 			continue
 		}
+		//初始化插件
 		err := plugin.Init(host)
 		if err != nil {
 			klog.Errorf("Failed to load volume plugin %s, error: %s", name, err.Error())

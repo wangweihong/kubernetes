@@ -36,6 +36,8 @@ import (
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
 )
 
+//kubelet和CSI driver通信的接口
+//这些接口都是CSI driver必须要实现的以下接口
 type csiClient interface {
 	NodeGetInfo(ctx context.Context) (
 		nodeID string,
@@ -78,6 +80,7 @@ type csiClient interface {
 		targetPath string,
 	) (*volume.Metrics, error)
 	NodeUnstageVolume(ctx context.Context, volID, stagingTargetPath string) error
+	//检测
 	NodeSupportsStageUnstage(ctx context.Context) (bool, error)
 	NodeSupportsNodeExpand(ctx context.Context) (bool, error)
 	NodeSupportsVolumeStats(ctx context.Context) (bool, error)

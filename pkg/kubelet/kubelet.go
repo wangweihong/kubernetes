@@ -813,6 +813,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	// NewInitializedVolumePluginMgr initializes some storageErrors on the Kubelet runtimeState (in csi_plugin.go init)
 	// which affects node ready status. This function must be called before Kubelet is initialized so that the Node
 	// ReadyState is accurate with the storage state.
+	//创建卷插件管理器
 	klet.volumePluginMgr, err =
 		NewInitializedVolumePluginMgr(klet, secretManager, configMapManager, tokenManager, kubeDeps.VolumePlugins, kubeDeps.DynamicPluginProber)
 	if err != nil {
@@ -918,11 +919,11 @@ type Kubelet struct {
 	kubeletConfiguration kubeletconfiginternal.KubeletConfiguration
 
 	// hostname is the hostname the kubelet detected or was given via flag/config
-	hostname string
+	hostname string //kubelet主机名，如果没有通过kubelet参数指定，默认就是主机名(小写）。一般情况等同于nodeName,除了使用cloud provider.
 	// hostnameOverridden indicates the hostname was overridden via flag/config
 	hostnameOverridden bool
 
-	nodeName        types.NodeName
+	nodeName        types.NodeName //kubelet 节点名
 	runtimeCache    kubecontainer.RuntimeCache
 	kubeClient      clientset.Interface
 	heartbeatClient clientset.Interface
@@ -986,7 +987,7 @@ type Kubelet struct {
 
 	// Last timestamp when runtime responded on ping.
 	// Mutex is used to protect this value.
-	runtimeState *runtimeState
+	runtimeState *runtimeState //记录运行时kubelet各种错误
 
 	// Volume plugins.
 	volumePluginMgr *volume.VolumePluginMgr

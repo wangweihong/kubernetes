@@ -50,6 +50,7 @@ import (
 //
 // kubelet - used by VolumeHost methods to expose kubelet specific parameters
 // plugins - used to initialize volumePluginMgr
+//初始化卷插件管理器？
 func NewInitializedVolumePluginMgr(
 	kubelet *Kubelet,
 	secretManager secret.Manager,
@@ -116,6 +117,7 @@ type kubeletVolumeHost struct {
 	exec             utilexec.Interface
 }
 
+//设置kubelet运行时存储错误
 func (kvh *kubeletVolumeHost) SetKubeletError(err error) {
 	kvh.kubelet.runtimeState.setStorageState(err)
 }

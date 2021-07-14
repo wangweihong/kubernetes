@@ -55,6 +55,8 @@ import (
 )
 
 // ProbeVolumePlugins collects all volume plugins into an easy to use list.
+//根据kubelet的启动参数配置的FeatureGate选定卷插件列表。
+// 这些卷插件列表将交由kubelet的卷插件管理器初始化进行管理
 func ProbeVolumePlugins(featureGate featuregate.FeatureGate) ([]volume.VolumePlugin, error) {
 	allPlugins := []volume.VolumePlugin{}
 

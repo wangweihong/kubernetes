@@ -50,6 +50,7 @@ func (s *DriversStore) Get(driverName string) (Driver, bool) {
 
 // Set lets you save a CSI Driver to the list and give it a specific name.
 // This method is protected by a mutex.
+//CSI插件注册时，记录到驱动表中
 func (s *DriversStore) Set(driverName string, driver Driver) {
 	s.Lock()
 	defer s.Unlock()
@@ -63,6 +64,7 @@ func (s *DriversStore) Set(driverName string, driver Driver) {
 
 // Delete lets you delete a CSI Driver by name.
 // This method is protected by a mutex.
+//注册失败或者删除注册驱动时删除
 func (s *DriversStore) Delete(driverName string) {
 	s.Lock()
 	defer s.Unlock()

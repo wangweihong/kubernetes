@@ -61,9 +61,9 @@ const (
 
 type csiPlugin struct {
 	host                   volume.VolumeHost
-	blockEnabled           bool
-	csiDriverLister        storagelisters.CSIDriverLister
-	volumeAttachmentLister storagelisters.VolumeAttachmentLister
+	blockEnabled           bool                                  //kubelet是否启动了CSI driver的block特性
+	csiDriverLister        storagelisters.CSIDriverLister        //用来获取Apiserver中CSIDriver资源的列表
+	volumeAttachmentLister storagelisters.VolumeAttachmentLister //用来获取Apiserver中VolumeAttachment资源的列表信息。kubelet不需要。controllerManager才需要设置。
 }
 
 // ProbeVolumePlugins returns implemented plugins
@@ -85,9 +85,9 @@ type RegistrationHandler struct {
 // TODO (verult) consider using a struct instead of global variables
 // csiDrivers map keep track of all registered CSI drivers on the node and their
 // corresponding sockets
-var csiDrivers = &DriversStore{}
+var csiDrivers = &DriversStore{} // 读写安全表，用于记录已注册的CSI插件。
 
-var nim nodeinfomanager.Interface
+var nim nodeinfomanager.Interface // 在csiPlugin初始化时创建该对象
 
 // PluginHandler is the plugin registration handler interface passed to the
 // pluginwatcher module in kubelet
@@ -98,7 +98,8 @@ var PluginHandler = &RegistrationHandler{} //csi插件注册器。用于处理�
 func (h *RegistrationHandler) ValidatePlugin(pluginName string, endpoint string, versions []string) error {
 	klog.Infof(log("Trying to validate a new CSI Driver with name: %s endpoint: %s versions: %s",
 		pluginName, endpoint, strings.Join(versions, ",")))
-	//检测插件版本是否兼容，插件是否已经注册。
+	//1. 检测插件是否已经注册。
+	//2. 如果插件已经注册，那么期待注册的版本是否高于已注册的版本
 	_, err := h.validateVersions("ValidatePlugin", pluginName, endpoint, versions)
 	if err != nil {
 		return fmt.Errorf("validation failed for CSI Driver %s at endpoint %s: %v", pluginName, endpoint, err)
@@ -108,9 +109,14 @@ func (h *RegistrationHandler) ValidatePlugin(pluginName string, endpoint string,
 }
 
 // RegisterPlugin is called when a plugin can be registered
+// 注册CSI插件。由PluginManager检测到CSI插件注册时调用
+// pluginName: 插件名
+// endpoint: 插件通信端点（不一定和插件注册端点相同）
+// versions: 插件支持版本列表
 func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string, versions []string) error {
 	klog.Infof(log("Register new plugin with name: %s at endpoint: %s", pluginName, endpoint))
-
+	// 检测插件最高版本
+	// 如果已经有高版本的同名插件注册，则注册失败
 	highestSupportedVersion, err := h.validateVersions("RegisterPlugin", pluginName, endpoint, versions)
 	if err != nil {
 		return err
@@ -119,13 +125,14 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 	// Storing endpoint of newly registered CSI driver into the map, where CSI driver name will be the key
 	// all other CSI components will be able to get the actual socket of CSI drivers by its name.
 	//保存注册的CSI插件到CSI驱动表中。
+	//直接替换掉低版本的插件。
 	csiDrivers.Set(pluginName, Driver{
 		endpoint:                endpoint,
 		highestSupportedVersion: highestSupportedVersion,
 	})
 
 	// Get node info from the driver.
-	//建立与CSI驱动的客户端
+	//建立与CSI驱动的客户端(node端）
 	csi, err := newCsiDriverClient(csiDriverName(pluginName))
 	if err != nil {
 		return err
@@ -135,6 +142,7 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 	defer cancel()
 
 	//获取CSI驱动的节点信息
+	//accessibleTopology：键值对。会更新到 kubelet对应的node.label上可用于调度。
 	driverNodeID, maxVolumePerNode, accessibleTopology, err := csi.NodeGetInfo(ctx)
 	if err != nil {
 		if unregErr := unregisterDriver(pluginName); unregErr != nil {
@@ -142,7 +150,8 @@ func (h *RegistrationHandler) RegisterPlugin(pluginName string, endpoint string,
 		}
 		return err
 	}
-
+	//1. 将CSIDriver的driverName以及driverNode记录到node的Annotation中，将 accessibleTopology更新到node的label中
+	//2. 将CSIDriver的driverName以及driverNode，accessibleTopology更新到CSINode.spec(不存在CSINode则创建)中
 	err = nim.InstallCSIDriver(pluginName, driverNodeID, maxVolumePerNode, accessibleTopology)
 	if err != nil {
 		if unregErr := unregisterDriver(pluginName); unregErr != nil {
@@ -168,6 +177,7 @@ func (h *RegistrationHandler) validateVersions(callerName, pluginName string, en
 	//插件是否已经注册
 	existingDriver, driverExists := csiDrivers.Get(pluginName)
 	if driverExists {
+		// 注册插件的版本低于已注册插件的版本
 		if !existingDriver.highestSupportedVersion.LessThan(newDriverHighestVersion) {
 			return nil, errors.New(log("%s for CSI driver %q failed. Another driver with the same name is already registered with a higher supported version: %q", callerName, pluginName, existingDriver.highestSupportedVersion))
 		}
@@ -188,11 +198,13 @@ func (h *RegistrationHandler) DeRegisterPlugin(pluginName string) {
 func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	p.host = host
 
+	//获得从apiserver通信的客户端
 	csiClient := host.GetKubeClient()
 	if csiClient == nil {
 		klog.Warning(log("kubeclient not set, assuming standalone kubelet"))
 	} else {
 		// set CSIDriverLister and volumeAttachmentLister
+		//如果初始化是由ControllerManager的AttachDetachController发起，而非kubelet
 		adcHost, ok := host.(volume.AttachDetachVolumeHost)
 		if ok {
 			p.csiDriverLister = adcHost.CSIDriverLister()
@@ -204,14 +216,15 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 				klog.Error(log("VolumeAttachmentLister not found on AttachDetachVolumeHost"))
 			}
 		}
+		//初始化由kubelet发起
 		kletHost, ok := host.(volume.KubeletVolumeHost)
 		if ok {
-			p.csiDriverLister = kletHost.CSIDriverLister()
+			p.csiDriverLister = kletHost.CSIDriverLister() //CSIDriver资源列表接口
 			if p.csiDriverLister == nil {
 				klog.Error(log("CSIDriverLister not found on KubeletVolumeHost"))
 			}
 			// We don't run the volumeAttachmentLister in the kubelet context
-			p.volumeAttachmentLister = nil
+			p.volumeAttachmentLister = nil // kubelet不关心VolumeAttachment资源
 		}
 	}
 
@@ -234,12 +247,15 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	}
 
 	// Initializing the label management channels
+	// nim是一个全局变量
 	nim = nodeinfomanager.NewNodeInfoManager(host.GetNodeName(), host, migratedPlugins)
 
+	//CSINodeInfo在1.16版本后默认启动(1.19后已经废弃），CSIMigration在1.17版本后默认启动
 	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) &&
 		utilfeature.DefaultFeatureGate.Enabled(features.CSIMigration) {
 		// This function prevents Kubelet from posting Ready status until CSINode
 		// is both installed and initialized
+		// 异步启动协程创建或更新与当前kubelet相关的CSINode
 		if err := initializeCSINode(host); err != nil {
 			return errors.New(log("failed to initialize CSINode: %v", err))
 		}
@@ -248,6 +264,8 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	return nil
 }
 
+// 设置kubelet运行时存储错误”CSI Node未初始化"(这使得kubelet对应的node处于Unready Condition),启动一个协程创建或者更新CSINode对象
+// 当对象创建成功后, 移除运行时存储错误信息。
 func initializeCSINode(host volume.VolumeHost) error {
 	kvh, ok := host.(volume.KubeletVolumeHost)
 	if !ok {
@@ -260,14 +278,18 @@ func initializeCSINode(host volume.VolumeHost) error {
 		klog.Warning("Skipping CSINode initialization, kubelet running in standalone mode")
 		return nil
 	}
-
+	//设置kubelet运行时存储“CSINode未初始化错误“
+	//设置这个存储会导致kubelet对应的Node处于NotReady Condition.
 	kvh.SetKubeletError(errors.New("CSINode is not yet initialized"))
 
 	go func() {
 		defer utilruntime.HandleCrash()
 
 		// First wait indefinitely to talk to Kube APIServer
+		// kubelet节点名
 		nodeName := host.GetNodeName()
+		// 一直向apiserver获取csi node的信息直到apiserver正常回应（此时csinode可能不存在，但无所谓）/
+		// 目的是确保1. kubelet能够向apiserve获取csinode信息（有权限)，2. apiserver能够正常回应
 		err := waitForAPIServerForever(kubeClient, nodeName)
 		if err != nil {
 			klog.Fatalf("Failed to initialize CSINode while waiting for API server to report ok: %v", err)
@@ -277,12 +299,15 @@ func initializeCSINode(host volume.VolumeHost) error {
 		// after max retry steps.
 		initBackoff := wait.Backoff{
 			Steps:    6,
-			Duration: 15 * time.Millisecond,
-			Factor:   6.0,
-			Jitter:   0.1,
+			Duration: 15 * time.Millisecond, //初始回避值。
+			Factor:   6.0,                   //因数
+			Jitter:   0.1,                   //误差值
 		}
+		//执行创建/更新CSINode动作，当每次创建/更新失败后，睡眠一段时间（每次时间都会延长，第一次15毫秒左右，第二次90毫，第三次540，第四次3.24秒 ，第五次18秒）最多睡眠step-1次
 		err = wait.ExponentialBackoff(initBackoff, func() (bool, error) {
 			klog.V(4).Infof("Initializing migrated drivers on CSINode")
+			// 如果csiNode不存在，则创建csiNode.
+			// 如果csiNode已存在，则更新其annotation
 			err := nim.InitializeCSINodeWithAnnotation()
 			if err != nil {
 				kvh.SetKubeletError(fmt.Errorf("Failed to initialize CSINode: %v", err))
@@ -291,6 +316,7 @@ func initializeCSINode(host volume.VolumeHost) error {
 			}
 
 			// Successfully initialized drivers, allow Kubelet to post Ready
+			// 移除runtime state存储错误，如果没有其他运行错误，kubelet对应的Node可以回到Ready Conidtion
 			kvh.SetKubeletError(nil)
 			return true, nil
 		})
@@ -909,7 +935,9 @@ func (p *csiPlugin) newAttacherDetacher() (*csiAttacher, error) {
 
 func unregisterDriver(driverName string) error {
 	csiDrivers.Delete(driverName)
-
+	//1.将特定的CSIDriver从CSINode.spec列表中移除
+	//2.移除node.status.allocatable以及node.status.capacity中指定驱动最大卷挂载数量信息
+	//3.将csi driver从node的annotation "csi.volume.kubernetes.io/nodeid"中移除
 	if err := nim.UninstallCSIDriver(driverName); err != nil {
 		return errors.New(log("Error uninstalling CSI driver: %v", err))
 	}

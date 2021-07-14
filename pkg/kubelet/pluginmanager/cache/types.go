@@ -44,6 +44,7 @@ package cache
 //      registers at foo.com/foo-1.9.9
 //
 // DeRegistration: When ReRegistration happens only the deletion of the new socket will trigger a DeRegister call
+//这个接口有两个实现，一是DevicePlugin；二是CSIPlugin
 type PluginHandler interface {
 	// Validate returns an error if the information provided by
 	// the potential plugin is erroneous (unsupported version, ...)
@@ -56,8 +57,10 @@ type PluginHandler interface {
 	// RegisterPlugin is called so that the plugin can be register by any
 	// plugin consumer
 	// Error encountered here can still be Notified to the plugin.
+	//真正注册插件
 	RegisterPlugin(pluginName, endpoint string, versions []string) error
 	// DeRegister is called once the pluginwatcher observes that the socket has
 	// been deleted.
+	//移除插件的注册
 	DeRegisterPlugin(pluginName string)
 }

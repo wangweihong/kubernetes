@@ -25,13 +25,14 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
+//这些运行中的各种错误会反馈到 kubelet对应的Node Ready Condition中。
 type runtimeState struct {
 	sync.RWMutex
 	lastBaseRuntimeSync      time.Time
 	baseRuntimeSyncThreshold time.Duration
 	networkError             error
 	runtimeError             error
-	storageError             error
+	storageError             error //存储错误
 	cidr                     string
 	healthChecks             []*healthCheck
 }
