@@ -26,39 +26,44 @@ import (
 
 type RateLimiter interface {
 	// When gets an item and gets to decide how long that item should wait
-	When(item interface{}) time.Duration
+	When(item interface{}) time.Duration //计算对象需要等待多长时间u，有些限速器会根据对象进入队列的次数而延迟等待时间
 	// Forget indicates that an item is finished being retried.  Doesn't matter whether its for perm failing
 	// or for success, we'll stop tracking it
-	Forget(item interface{})
+	Forget(item interface{}) //不再关注指定对象。从表(如果有）移除，不再跟踪对象失败次数
 	// NumRequeues returns back how many failures the item has had
-	NumRequeues(item interface{}) int
+	NumRequeues(item interface{}) int //对象失败了多少次(重新进入队列多少次)
 }
 
 // DefaultControllerRateLimiter is a no-arg constructor for a default rate limiter for a workqueue.  It has
 // both overall and per-item rate limiting.  The overall is a token bucket and the per-item is exponential
 func DefaultControllerRateLimiter() RateLimiter {
+	//这个限速器由失败重试退避限速器和令牌桶限速器组成，等待延时使用两个限速其中最长延时
 	return NewMaxOfRateLimiter(
 		NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
 		// 10 qps, 100 bucket size.  This is only for retry speed and its only the overall factor (not per item)
-		&BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+		&BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)}, //上限10个，每当消费1个，需要等待100
 	)
 }
 
 // BucketRateLimiter adapts a standard bucket to the workqueue ratelimiter API
+//令牌桶限速器
 type BucketRateLimiter struct {
 	*rate.Limiter
 }
 
 var _ RateLimiter = &BucketRateLimiter{}
 
+//根据桶里的令牌数，以及令牌补充时间来计算等待时间
 func (r *BucketRateLimiter) When(item interface{}) time.Duration {
 	return r.Limiter.Reserve().Delay()
 }
 
+//令牌桶不关心失败次数
 func (r *BucketRateLimiter) NumRequeues(item interface{}) int {
 	return 0
 }
 
+//令牌通不记录对象
 func (r *BucketRateLimiter) Forget(item interface{}) {
 }
 
@@ -123,6 +128,7 @@ type ItemExponentialFailureRateLimiter struct {
 var _ RateLimiter = &ItemExponentialFailureRateLimiter{}
 
 //这个限速器会根据对象的失败次数从基本重试中计算出下一次重试时间（base*2的失败次数次方），直到达到最大重试
+//失败重试退避限速器
 func NewItemExponentialFailureRateLimiter(baseDelay time.Duration, maxDelay time.Duration) RateLimiter {
 	return &ItemExponentialFailureRateLimiter{
 		failures:  map[interface{}]int{},

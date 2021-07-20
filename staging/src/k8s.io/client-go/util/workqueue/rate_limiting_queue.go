@@ -21,7 +21,7 @@ type RateLimitingInterface interface {
 	DelayingInterface
 
 	// AddRateLimited adds an item to the workqueue after the rate limiter says it's ok
-	AddRateLimited(item interface{}) //根据限速器算出对象新的等待插入到的时间(有些限速器会根据失败次数来进行退避,如每次失败会增加2倍延时)，延时插入该对象
+	AddRateLimited(item interface{}) //根据限速器算出对象新的等待插入到的时间(有些限速器会根据失败次数来进行退避,如每次失败会增加2倍延时)，加入等待队列等待加入工作队列
 
 	// Forget indicates that an item is finished being retried.  Doesn't matter whether it's for perm failing
 	// or for success, we'll stop the rate limiter from tracking it.  This only clears the `rateLimiter`, you
@@ -56,9 +56,10 @@ type rateLimitingType struct {
 }
 
 // AddRateLimited AddAfter's the item based on the time when the rate limiter says it's ok
-//根据限速器算出对象新的等待插入到的时间(有些限速器会根据失败次数来进行退避,如每次失败会增加2倍延时)，延时插入该对象
+//根据限速器算出对象新的等待插入到的时间(有些限速器会根据失败次数来进行退避,如每次失败会增加2倍延时)，加入等待队列等待加入工作队列
 func (q *rateLimitingType) AddRateLimited(item interface{}) {
 	//根据限速器算出对象新的等待插入到的时间(有些限速器会根据失败次数来进行退避,如每次失败会增加2倍延时)
+	//如果之前已经在等待队列中等待，则更新等待时间(如果新的等待时间更短)
 	q.DelayingInterface.AddAfter(item, q.rateLimiter.When(item))
 }
 
