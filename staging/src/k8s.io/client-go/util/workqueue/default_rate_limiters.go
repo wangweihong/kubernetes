@@ -114,14 +114,15 @@ func (r *ItemBucketRateLimiter) Forget(item interface{}) {
 // dealing with max failures and expiration are up to the caller
 type ItemExponentialFailureRateLimiter struct {
 	failuresLock sync.Mutex
-	failures     map[interface{}]int
+	failures     map[interface{}]int //保存某个对象的失败次数
 
-	baseDelay time.Duration
-	maxDelay  time.Duration
+	baseDelay time.Duration //用来算新的退避时间 baseDelay*2^<num-failures>
+	maxDelay  time.Duration //最大延时.(退避时间不能超过改时间)
 }
 
 var _ RateLimiter = &ItemExponentialFailureRateLimiter{}
 
+//这个限速器会根据对象的失败次数从基本重试中计算出下一次重试时间（base*2的失败次数次方），直到达到最大重试
 func NewItemExponentialFailureRateLimiter(baseDelay time.Duration, maxDelay time.Duration) RateLimiter {
 	return &ItemExponentialFailureRateLimiter{
 		failures:  map[interface{}]int{},
@@ -134,10 +135,11 @@ func DefaultItemBasedRateLimiter() RateLimiter {
 	return NewItemExponentialFailureRateLimiter(time.Millisecond, 1000*time.Second)
 }
 
+// 根据对象的失败次数来计算出来某对象的下一次执行时间
 func (r *ItemExponentialFailureRateLimiter) When(item interface{}) time.Duration {
 	r.failuresLock.Lock()
 	defer r.failuresLock.Unlock()
-
+	//失败次数
 	exp := r.failures[item]
 	r.failures[item] = r.failures[item] + 1
 
@@ -155,6 +157,7 @@ func (r *ItemExponentialFailureRateLimiter) When(item interface{}) time.Duration
 	return calculated
 }
 
+//对象的失败次数
 func (r *ItemExponentialFailureRateLimiter) NumRequeues(item interface{}) int {
 	r.failuresLock.Lock()
 	defer r.failuresLock.Unlock()
@@ -162,6 +165,7 @@ func (r *ItemExponentialFailureRateLimiter) NumRequeues(item interface{}) int {
 	return r.failures[item]
 }
 
+//直接删除对象的失败次数记录
 func (r *ItemExponentialFailureRateLimiter) Forget(item interface{}) {
 	r.failuresLock.Lock()
 	defer r.failuresLock.Unlock()
@@ -224,6 +228,7 @@ type MaxOfRateLimiter struct {
 	limiters []RateLimiter
 }
 
+// 在所有限速器中找到最大延时
 func (r *MaxOfRateLimiter) When(item interface{}) time.Duration {
 	ret := time.Duration(0)
 	for _, limiter := range r.limiters {
@@ -240,6 +245,7 @@ func NewMaxOfRateLimiter(limiters ...RateLimiter) RateLimiter {
 	return &MaxOfRateLimiter{limiters: limiters}
 }
 
+//在所有限速器中找到最高的失败次数
 func (r *MaxOfRateLimiter) NumRequeues(item interface{}) int {
 	ret := 0
 	for _, limiter := range r.limiters {
@@ -252,6 +258,7 @@ func (r *MaxOfRateLimiter) NumRequeues(item interface{}) int {
 	return ret
 }
 
+//从所有限速器中，将指定的对象删除
 func (r *MaxOfRateLimiter) Forget(item interface{}) {
 	for _, limiter := range r.limiters {
 		limiter.Forget(item)
