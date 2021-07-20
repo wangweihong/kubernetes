@@ -26,9 +26,9 @@ import (
 type Interface interface {
 	Add(item interface{})
 	Len() int
-	Get() (item interface{}, shutdown bool)
+	Get() (item interface{}, shutdown bool) //当队列关闭时, 会通过shudown标志告知
 	Done(item interface{})
-	ShutDown()
+	ShutDown() //关闭队列，这会告知所有在等待队列数据的协程
 	ShuttingDown() bool
 }
 
@@ -66,20 +66,21 @@ type Type struct {
 	// queue defines the order in which we will work on items. Every
 	// element of queue should be in the dirty set and not in the
 	// processing set.
-	queue []t
+	queue []t // 排队要处理的对象
 
 	// dirty defines all of the items that need to be processed.
-	dirty set
+	dirty set //用来存放需要加入到queue中处理的对象。如果该对象正在处理(processing表中),则不会立即加入到queue中排队，直到处理结束后才加入到队列
+	//即同一个对象如果正在被工作线程处理，则先不排队。当被处理结束后再次排队
 
 	// Things that are currently being processed are in the processing set.
 	// These things may be simultaneously in the dirty set. When we finish
 	// processing something and remove it from this set, we'll check if
 	// it's in the dirty set, and if so, add it to the queue.
-	processing set
+	processing set //当有对象被从queue提取出来交由工作进程成立时，就会加入到该表中。表明该对象正在被工作进程处理
 
-	cond *sync.Cond
+	cond *sync.Cond //条件变量。可以广播所有等待者
 
-	shuttingDown bool
+	shuttingDown bool //队列是否关闭
 
 	metrics queueMetrics
 
@@ -105,30 +106,36 @@ func (s set) delete(item t) {
 }
 
 // Add marks item as needing processing.
+// 写入一个数据，唤醒一个等待的工作进程
 func (q *Type) Add(item interface{}) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
+	//如果队列正在关闭
 	if q.shuttingDown {
 		return
 	}
+	//检测数据是否已经加入工作队列排队等待处理
 	if q.dirty.has(item) {
 		return
 	}
 
 	q.metrics.add(item)
-
+	//加入等待处理表
 	q.dirty.insert(item)
+	//该对象正在被工作线程处理中，则不再加入队列（线程通过Get()提取数据，正在处理)
 	if q.processing.has(item) {
 		return
 	}
-
+	//加入工作队列排队等待处理
 	q.queue = append(q.queue, item)
+	//唤醒一个工作线程
 	q.cond.Signal()
 }
 
 // Len returns the current queue length, for informational purposes only. You
 // shouldn't e.g. gate a call to Add() or Get() on Len() being a particular
 // value, that can't be synchronized properly.
+//当前有多少对象等待处理
 func (q *Type) Len() int {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
@@ -138,9 +145,11 @@ func (q *Type) Len() int {
 // Get blocks until it can return an item to be processed. If shutdown = true,
 // the caller should end their goroutine. You must call Done with item when you
 // have finished processing it.
+//如果当前没有数据，而且队列没有关闭，则工作进程等待；如果正在关闭则告知关闭；提取队列第一个对象继续处理
 func (q *Type) Get() (item interface{}, shutdown bool) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
+	//如果当前没有数据，而且队列没有关闭，则工作进程等待
 	for len(q.queue) == 0 && !q.shuttingDown {
 		q.cond.Wait()
 	}
@@ -152,8 +161,9 @@ func (q *Type) Get() (item interface{}, shutdown bool) {
 	item, q.queue = q.queue[0], q.queue[1:]
 
 	q.metrics.get(item)
-
+	//加入正在处理表
 	q.processing.insert(item)
+	//从等待处理表中移除
 	q.dirty.delete(item)
 
 	return item, false
@@ -162,13 +172,15 @@ func (q *Type) Get() (item interface{}, shutdown bool) {
 // Done marks item as done processing, and if it has been marked as dirty again
 // while it was being processed, it will be re-added to the queue for
 // re-processing.
+// 某个对象已经被工作线程处理，从正在处理表中移除；如果该对象又被更新了（需要再次处理），再次将对象新数据进行排队，并唤醒一个工作线程开始处理
 func (q *Type) Done(item interface{}) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
 	q.metrics.done(item)
-
+	//从正在处理表中移除
 	q.processing.delete(item)
+	// 如果该对象又被更新了（需要再次处理），再次将对象新数据进行排队，并唤醒一个工作线程开始处理
 	if q.dirty.has(item) {
 		q.queue = append(q.queue, item)
 		q.cond.Signal()
@@ -178,6 +190,7 @@ func (q *Type) Done(item interface{}) {
 // ShutDown will cause q to ignore all new items added to it. As soon as the
 // worker goroutines have drained the existing items in the queue, they will be
 // instructed to exit.
+// 广播所有等待的工作线程当前队列的关闭
 func (q *Type) ShutDown() {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
@@ -185,6 +198,7 @@ func (q *Type) ShutDown() {
 	q.cond.Broadcast()
 }
 
+//检测当前工作队列是否为空
 func (q *Type) ShuttingDown() bool {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
