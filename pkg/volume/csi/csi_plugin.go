@@ -60,9 +60,9 @@ const (
 )
 
 type csiPlugin struct {
-	host                   volume.VolumeHost
+	host                   volume.VolumeHost                     //提供访问kubelet的功能
 	blockEnabled           bool                                  //kubelet是否启动了CSI driver的block特性
-	csiDriverLister        storagelisters.CSIDriverLister        //用来获取Apiserver中CSIDriver资源的列表
+	csiDriverLister        storagelisters.CSIDriverLister        //用来获取Apiserver中CSIDriver资源的列表 ? CSIDriver是谁创建的?
 	volumeAttachmentLister storagelisters.VolumeAttachmentLister //用来获取Apiserver中VolumeAttachment资源的列表信息。kubelet不需要。controllerManager才需要设置。
 }
 
@@ -85,14 +85,14 @@ type RegistrationHandler struct {
 // TODO (verult) consider using a struct instead of global variables
 // csiDrivers map keep track of all registered CSI drivers on the node and their
 // corresponding sockets
-var csiDrivers = &DriversStore{} // 读写安全表，用于记录已注册的CSI插件。
+var csiDrivers = &DriversStore{} // 读写安全表，用于记录已安装的CSI插件。
 
-var nim nodeinfomanager.Interface // 在csiPlugin初始化时创建该对象
+var nim nodeinfomanager.Interface // 在csiPlugin初始化时创建该对象。负责管理CSINode和Node
 
 // PluginHandler is the plugin registration handler interface passed to the
 // pluginwatcher module in kubelet
-var PluginHandler = &RegistrationHandler{} //csi插件注册器。用于处理新的csi driver注册
-
+var PluginHandler = &RegistrationHandler{} //csi插件注册器。用于处理新的csi driver注册。kubelet plugin manager注册新的CSIPlugin时
+//会调用RegistrationHandler执行的注册流程
 // ValidatePlugin is called by kubelet's plugin watcher upon detection
 // of a new registration socket opened by CSI Driver registrar side car.
 func (h *RegistrationHandler) ValidatePlugin(pluginName string, endpoint string, versions []string) error {
@@ -188,6 +188,7 @@ func (h *RegistrationHandler) validateVersions(callerName, pluginName string, en
 
 // DeRegisterPlugin is called when a plugin removed its socket, signaling
 // it is no longer available
+// 移除插件的注册
 func (h *RegistrationHandler) DeRegisterPlugin(pluginName string) {
 	klog.Info(log("registrationHandler.DeRegisterPlugin request for plugin %s", pluginName))
 	if err := unregisterDriver(pluginName); err != nil {
@@ -195,6 +196,7 @@ func (h *RegistrationHandler) DeRegisterPlugin(pluginName string) {
 	}
 }
 
+//初始化CSI pluign
 func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	p.host = host
 
@@ -247,7 +249,7 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	}
 
 	// Initializing the label management channels
-	// nim是一个全局变量
+	// nim是一个全局变量. 负责管理CSINode以及kubelet对应的Node
 	nim = nodeinfomanager.NewNodeInfoManager(host.GetNodeName(), host, migratedPlugins)
 
 	//CSINodeInfo在1.16版本后默认启动(1.19后已经废弃），CSIMigration在1.17版本后默认启动
@@ -278,10 +280,11 @@ func initializeCSINode(host volume.VolumeHost) error {
 		klog.Warning("Skipping CSINode initialization, kubelet running in standalone mode")
 		return nil
 	}
-	//设置kubelet运行时存储“CSINode未初始化错误“
+	//设置kubelet运行时存储“CSINode未初始化"错误
 	//设置这个存储会导致kubelet对应的Node处于NotReady Condition.
 	kvh.SetKubeletError(errors.New("CSINode is not yet initialized"))
-
+	// 启动协程创建和kubelet对应的Node同名的CSINode，当创建成功后， 移除kubelet运行时存储“CSINode未初始化"错误
+	// 如果CSINode创建失败, kubelet会因为CSINode未初始化错误导致一直处于NotReady Condition.
 	go func() {
 		defer utilruntime.HandleCrash()
 
@@ -332,6 +335,7 @@ func initializeCSINode(host volume.VolumeHost) error {
 	return nil
 }
 
+//默认写死 kubernetes.io/csi
 func (p *csiPlugin) GetPluginName() string {
 	return CSIPluginName
 }
@@ -348,6 +352,7 @@ func (p *csiPlugin) GetVolumeName(spec *volume.Spec) (string, error) {
 	return fmt.Sprintf("%s%s%s", csi.Driver, volNameSep, csi.VolumeHandle), nil
 }
 
+//pv是否非空而且pv.Spe.CSI不为空
 func (p *csiPlugin) CanSupport(spec *volume.Spec) bool {
 	// TODO (vladimirvivien) CanSupport should also take into account
 	// the availability/registration of specified Driver in the volume source
@@ -366,11 +371,12 @@ func (p *csiPlugin) RequiresRemount() bool {
 	return false
 }
 
+//每个Pod挂载卷都会创建一个Mounter
 func (p *csiPlugin) NewMounter(
 	spec *volume.Spec,
 	pod *api.Pod,
 	_ volume.VolumeOptions) (volume.Mounter, error) {
-
+	//csi的信息看是存在pod.spec.Volumes还是在pv.spec.CSI中
 	volSrc, pvSrc, err := getSourceFromSpec(spec)
 	if err != nil {
 		return nil, err
@@ -390,9 +396,9 @@ func (p *csiPlugin) NewMounter(
 			readOnly = *volSrc.ReadOnly
 		}
 	case pvSrc != nil:
-		driverName = pvSrc.Driver
-		volumeHandle = pvSrc.VolumeHandle
-		readOnly = spec.ReadOnly
+		driverName = pvSrc.Driver         //CSIDriver驱动名
+		volumeHandle = pvSrc.VolumeHandle // 对应的存储卷的唯一标识符
+		readOnly = spec.ReadOnly          //只读挂载
 	default:
 		return nil, errors.New(log("volume source not found in volume.Spec"))
 	}
@@ -795,6 +801,7 @@ func (p *csiPlugin) ConstructBlockVolumeSpec(podUID types.UID, specVolName, mapP
 
 // skipAttach looks up CSIDriver object associated with driver name
 // to determine if driver requires attachment volume operation
+//检测指定的驱动是否需要跳过挂载步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略挂载?)
 func (p *csiPlugin) skipAttach(driver string) (bool, error) {
 	kletHost, ok := p.host.(volume.KubeletVolumeHost)
 	if ok {
@@ -806,8 +813,10 @@ func (p *csiPlugin) skipAttach(driver string) (bool, error) {
 	if p.csiDriverLister == nil {
 		return false, errors.New("CSIDriver lister does not exist")
 	}
+	//获取指定驱动的CSIDriver(?CSI driver是谁创建的?)
 	csiDriver, err := p.csiDriverLister.Get(driver)
 	if err != nil {
+		//如果当前驱动不存在CSIDriver对象
 		if apierrors.IsNotFound(err) {
 			// Don't skip attach if CSIDriver does not exist
 			return false, nil
@@ -896,15 +905,20 @@ func (p *csiPlugin) getVolumeLifecycleMode(spec *volume.Spec) (storage.VolumeLif
 	return storage.VolumeLifecyclePersistent, nil
 }
 
+//通过driver对应的CSIDriver来决定要跳过挂载，如果跳过则什么都不干；否则根据handle/driver/nodename得到对应的VolumeAttachment，返回其中status.AttachmentMetadata信息
 func (p *csiPlugin) getPublishContext(client clientset.Interface, handle, driver, nodeName string) (map[string]string, error) {
+	//根据driver对应的CSIDriver对象是否存在，以及.Spec.AttachRequired的值来确认是否跳过挂载
 	skip, err := p.skipAttach(driver)
 	if err != nil {
 		return nil, err
 	}
+
+	//跳过挂载，什么都不做
 	if skip {
 		return nil, nil
 	}
 
+	//通过卷名/驱动名/节点名算出一个VolumeAttachments ID
 	attachID := getAttachmentName(handle, driver, nodeName)
 
 	// search for attachment by VolumeAttachment.Spec.Source.PersistentVolumeName
@@ -985,6 +999,7 @@ func highestSupportedVersion(versions []string) (*utilversion.Version, error) {
 
 // waitForAPIServerForever waits forever to get a CSINode instance as a proxy
 // for a healthy APIServer
+//
 func waitForAPIServerForever(client clientset.Interface, nodeName types.NodeName) error {
 	var lastErr error
 	err := wait.PollImmediateInfinite(time.Second, func() (bool, error) {

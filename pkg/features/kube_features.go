@@ -310,6 +310,7 @@ const (
 	// beta: v1.16
 	//
 	// Enables CSI Inline volumes support for pods
+	//1.16默认开启
 	CSIInlineVolume featuregate.Feature = "CSIInlineVolume"
 
 	// owner: @tallclair

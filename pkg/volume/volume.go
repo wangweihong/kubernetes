@@ -248,7 +248,7 @@ type DeviceMounter interface {
 	// GetDeviceMountPath returns a path where the device should
 	// be mounted after it is attached. This is a global mount
 	// point which should be bind mounted for individual volumes.
-	GetDeviceMountPath(spec *Spec) (string, error)
+	GetDeviceMountPath(spec *Spec) (string, error) //kubelet/csi:  设备挂载路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，
 
 	// MountDevice mounts the disk to a global path which
 	// individual pods can then bind mount

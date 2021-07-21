@@ -47,6 +47,7 @@ func (kl *Kubelet) getRootDir() string {
 
 // getPodsDir returns the full path to the directory under which pod
 // directories are created.
+//默认/var/lib/kubelet/pods
 func (kl *Kubelet) getPodsDir() string {
 	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPodsDirName)
 }
@@ -99,6 +100,7 @@ func (kl *Kubelet) GetPodDir(podUID types.UID) string {
 
 // getPodDir returns the full path to the per-pod directory for the pod with
 // the given UID.
+//var/lib/kubelet/pods/<podID>/
 func (kl *Kubelet) getPodDir(podUID types.UID) string {
 	return filepath.Join(kl.getPodsDir(), string(podUID))
 }
@@ -113,6 +115,7 @@ func (kl *Kubelet) getPodVolumeSubpathsDir(podUID types.UID) string {
 // getPodVolumesDir returns the full path to the per-pod data directory under
 // which volumes are created for the specified pod.  This directory may not
 // exist if the pod does not exist.
+// /var/lib/kubelet/pods/<podID>/volumes
 func (kl *Kubelet) getPodVolumesDir(podUID types.UID) string {
 	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletVolumesDirName)
 }
@@ -120,6 +123,8 @@ func (kl *Kubelet) getPodVolumesDir(podUID types.UID) string {
 // getPodVolumeDir returns the full path to the directory which represents the
 // named volume under the named plugin for specified pod.  This directory may not
 // exist if the pod does not exist.
+//  /var/lib/kubelet/pods/<podID>/volumes/<pluginName>/<volumeName>  用来表示挂载在pod内部的卷
+// 如:/var/lib/kubelet/pods/39920ed4-e363-471a-95bb-f559932efd5c/volumes/kubernetes.io~configmap/kube-proxy
 func (kl *Kubelet) getPodVolumeDir(podUID types.UID, pluginName string, volumeName string) string {
 	return filepath.Join(kl.getPodVolumesDir(podUID), pluginName, volumeName)
 }

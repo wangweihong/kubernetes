@@ -94,9 +94,9 @@ type csiDriverName string
 
 // csiClient encapsulates all csi-plugin methods
 type csiDriverClient struct {
-	driverName          csiDriverName
-	addr                csiAddr
-	nodeV1ClientCreator nodeV1ClientCreator
+	driverName          csiDriverName       // csi驱动名
+	addr                csiAddr             //csi驱动的通信端点
+	nodeV1ClientCreator nodeV1ClientCreator //这里会根据csi通信端点建立grpc连接，并返回相应的客户端（CSI Node部分，NodePublishVolume等)
 }
 
 var _ csiClient = &csiDriverClient{}
@@ -118,6 +118,7 @@ const (
 // the gRPC connection when the NodeClient is not used anymore.
 // This is the default implementation for the nodeV1ClientCreator, used in
 // newCsiDriverClient.
+// 生成csi规范中的NodeClient用来和addr地址的csi server通信
 func newV1NodeClient(addr csiAddr) (nodeClient csipbv1.NodeClient, closer io.Closer, err error) {
 	var conn *grpc.ClientConn
 	conn, err = newGrpcConn(addr)
@@ -129,16 +130,18 @@ func newV1NodeClient(addr csiAddr) (nodeClient csipbv1.NodeClient, closer io.Clo
 	return nodeClient, conn, nil
 }
 
+// 生成一个csi驱动客户端，该客户端中包含csi驱动通信端点以及一个与csidriver的NodeServer通信的客户端生成器
 func newCsiDriverClient(driverName csiDriverName) (*csiDriverClient, error) {
 	if driverName == "" {
 		return nil, fmt.Errorf("driver name is empty")
 	}
-
+	//从内存CSI驱动表中找到对应驱动的信息。驱动信息中包含与驱动的通信端点
+	// 当CSI插件注册到kubelet时, 就会将驱动添加到该表中
 	existingDriver, driverExists := csiDrivers.Get(string(driverName))
 	if !driverExists {
 		return nil, fmt.Errorf("driver name %s not found in the list of registered CSI drivers", driverName)
 	}
-
+	//生成csi规范中的NodeClient用来和addr地址的csi server通信
 	nodeV1ClientCreator := newV1NodeClient
 	return &csiDriverClient{
 		driverName:          driverName,
@@ -147,6 +150,7 @@ func newCsiDriverClient(driverName csiDriverName) (*csiDriverClient, error) {
 	}, nil
 }
 
+// 和CSI Driver通过NodeGetInfo()接口通信
 func (c *csiDriverClient) NodeGetInfo(ctx context.Context) (
 	nodeID string,
 	maxVolumePerNode int64,
@@ -155,6 +159,7 @@ func (c *csiDriverClient) NodeGetInfo(ctx context.Context) (
 	klog.V(4).Info(log("calling NodeGetInfo rpc"))
 
 	var getNodeInfoError error
+	// 和指定的后端进行通信,通过NodeGetInfo获取信息
 	nodeID, maxVolumePerNode, accessibleTopology, getNodeInfoError = c.nodeGetInfoV1(ctx)
 	if getNodeInfoError != nil {
 		klog.Warningf("Error calling CSI NodeGetInfo(): %v", getNodeInfoError.Error())
@@ -162,6 +167,7 @@ func (c *csiDriverClient) NodeGetInfo(ctx context.Context) (
 	return nodeID, maxVolumePerNode, accessibleTopology, getNodeInfoError
 }
 
+// 和指定的后端进行通信,通过NodeGetInfo获取信息
 func (c *csiDriverClient) nodeGetInfoV1(ctx context.Context) (
 	nodeID string,
 	maxVolumePerNode int64,
@@ -242,8 +248,8 @@ func (c *csiDriverClient) NodePublishVolume(
 	} else {
 		req.VolumeCapability.AccessType = &csipbv1.VolumeCapability_Mount{
 			Mount: &csipbv1.VolumeCapability_MountVolume{
-				FsType:     fsType,
-				MountFlags: mountOptions,
+				FsType:     fsType,       //挂载的文件类型
+				MountFlags: mountOptions, //挂载的标志
 			},
 		}
 	}
@@ -467,6 +473,7 @@ func (c *csiDriverClient) NodeSupportsStageUnstage(ctx context.Context) (bool, e
 	return stageUnstageSet, nil
 }
 
+//将pvc中的AccessMode转换成对应的csi模式
 func asCSIAccessModeV1(am api.PersistentVolumeAccessMode) csipbv1.VolumeCapability_AccessMode_Mode {
 	switch am {
 	case api.ReadWriteOnce:
@@ -479,6 +486,7 @@ func asCSIAccessModeV1(am api.PersistentVolumeAccessMode) csipbv1.VolumeCapabili
 	return csipbv1.VolumeCapability_AccessMode_UNKNOWN
 }
 
+//建立和addr的grpc连接
 func newGrpcConn(addr csiAddr) (*grpc.ClientConn, error) {
 	network := "unix"
 	klog.V(4).Infof(log("creating new gRPC connection for [%s://%s]", network, addr))
@@ -501,9 +509,10 @@ func newGrpcConn(addr csiAddr) (*grpc.ClientConn, error) {
 type csiClientGetter struct {
 	sync.RWMutex
 	csiClient  csiClient
-	driverName csiDriverName
+	driverName csiDriverName //csi驱动名
 }
 
+// 从csi驱动表中找到csi驱动端点，然后生成一个csi驱动客户端，该客户端中包含csi驱动通信端点以及一个与csidriver的NodeServer通信的客户端生成器
 func (c *csiClientGetter) Get() (csiClient, error) {
 	c.RLock()
 	if c.csiClient != nil {
@@ -517,6 +526,7 @@ func (c *csiClientGetter) Get() (csiClient, error) {
 	if c.csiClient != nil {
 		return c.csiClient, nil
 	}
+	// 生成一个csi驱动客户端，该客户端中包含csi驱动通信端点以及一个与csidriver的NodeServer通信的客户端生成器
 	csi, err := newCsiDriverClient(c.driverName)
 	if err != nil {
 		return nil, err

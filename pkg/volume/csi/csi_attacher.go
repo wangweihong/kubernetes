@@ -41,6 +41,7 @@ import (
 )
 
 const (
+	//全局挂载挂载目录为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，
 	persistentVolumeInGlobalPath = "pv"
 	globalMountInGlobalPath      = "globalmount"
 )
@@ -105,7 +106,7 @@ func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string
 			Source:   vaSrc,
 		},
 	}
-
+	//创建volumeAttachmennt
 	_, err = c.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 	alreadyExist := false
 	if err != nil {
@@ -222,8 +223,10 @@ func (c *csiAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName types.No
 	return attached, nil
 }
 
+// 设备挂载路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，
 func (c *csiAttacher) GetDeviceMountPath(spec *volume.Spec) (string, error) {
 	klog.V(4).Info(log("attacher.GetDeviceMountPath(%v)", spec))
+	// 路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，不管是什么CSI插件
 	deviceMountPath, err := makeDeviceMountPath(c.plugin, spec)
 	if err != nil {
 		return "", errors.New(log("attacher.GetDeviceMountPath failed to make device mount path: %v", err))
@@ -321,6 +324,7 @@ func (c *csiAttacher) MountDevice(spec *volume.Spec, devicePath string, deviceMo
 		if err != nil && volumetypes.IsOperationFinishedError(err) {
 			// clean up metadata
 			klog.Errorf(log("attacher.MountDevice failed: %v", err))
+			//删除挂载目录，如果仍会有挂载什么都不做（也不去报错)
 			if err := removeMountDir(c.plugin, deviceMountPath); err != nil {
 				klog.Error(log("attacher.MountDevice failed to remove mount dir after error [%s]: %v", deviceMountPath, err))
 			}
@@ -509,8 +513,8 @@ func (c *csiAttacher) UnmountDevice(deviceMountPath string) error {
 
 	// Setup
 	var driverName, volID string
-	dataDir := filepath.Dir(deviceMountPath)
-	data, err := loadVolumeData(dataDir, volDataFileName)
+	dataDir := filepath.Dir(deviceMountPath)              //获取挂载路径目录
+	data, err := loadVolumeData(dataDir, volDataFileName) //查找挂载目录中的vol_data.json
 	if err == nil {
 		driverName = data[volDataKey.driverName]
 		volID = data[volDataKey.volHandle]
@@ -584,6 +588,7 @@ func isAttachmentName(unknownString string) bool {
 	return false
 }
 
+// 路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，不管是什么CSI插件
 func makeDeviceMountPath(plugin *csiPlugin, spec *volume.Spec) (string, error) {
 	if spec == nil {
 		return "", errors.New(log("makeDeviceMountPath failed, spec is nil"))

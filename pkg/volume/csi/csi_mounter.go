@@ -43,6 +43,8 @@ import (
 
 //TODO (vladimirvivien) move this in a central loc later
 var (
+	//  将会在/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/vol_data.json 生成以下的内容
+	// {"attachmentID":"csi-f68a9cdf83f572a3de797db507b8dd615595cf7054db3057b9e681bbbadab56a","driverName":"topsc.topke.io","nodeName":"haaaa-10-30-100-149","specVolID":"pvc-dca8527d-0939-4c6a-a2cc-e66a673f062c","volumeHandle":"pvc-dca8527d-0939-4c6a-a2cc-e66a673f062c","volumeLifecycleMode":"Persistent"}
 	volDataKey = struct {
 		specVolID,
 		volHandle,
@@ -53,7 +55,7 @@ var (
 	}{
 		"specVolID",
 		"volumeHandle",
-		"driverName",
+		"driverName", //真正的驱动名
 		"nodeName",
 		"attachmentID",
 		"volumeLifecycleMode",
@@ -66,8 +68,8 @@ type csiMountMgr struct {
 	plugin              *csiPlugin
 	driverName          csiDriverName
 	volumeLifecycleMode storage.VolumeLifecycleMode
-	volumeID            string
-	specVolumeID        string
+	volumeID            string //CSI后端存储卷标识
+	specVolumeID        string //pv名或者pod.spec.volume中指定的卷名
 	readOnly            bool
 	supportsSELinux     bool
 	spec                *volume.Spec
@@ -82,12 +84,14 @@ type csiMountMgr struct {
 // volume.Volume methods
 var _ volume.Volume = &csiMountMgr{}
 
+// /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  用来表示挂载在pod内部的卷
 func (c *csiMountMgr) GetPath() string {
 	dir := filepath.Join(getTargetPath(c.podUID, c.specVolumeID, c.plugin.host), "/mount")
 	klog.V(4).Info(log("mounter.GetPath generated [%s]", dir))
 	return dir
 }
 
+// /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>  用来表示挂载在pod内部的卷
 func getTargetPath(uid types.UID, specVolumeID string, host volume.VolumeHost) string {
 	specVolID := utilstrings.EscapeQualifiedName(specVolumeID)
 	return host.GetPodVolumeDir(uid, utilstrings.EscapeQualifiedName(CSIPluginName), specVolID)
@@ -96,6 +100,7 @@ func getTargetPath(uid types.UID, specVolumeID string, host volume.VolumeHost) s
 // volume.Mounter methods
 var _ volume.Mounter = &csiMountMgr{}
 
+//默认能挂载
 func (c *csiMountMgr) CanMount() error {
 	return nil
 }
@@ -104,12 +109,15 @@ func (c *csiMountMgr) SetUp(mounterArgs volume.MounterArgs) error {
 	return c.SetUpAt(c.GetPath(), mounterArgs)
 }
 
+// dir:/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  用来表示挂载在pod内部的卷
 func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error {
 	klog.V(4).Infof(log("Mounter.SetUpAt(%s)", dir))
 
 	corruptedDir := false
+	// 检测容器挂载路径是否已经被挂载
 	mounted, err := isDirMounted(c.plugin, dir)
 	if err != nil {
+		//检测容器挂载目录路径是否存在有问题的挂载
 		if isCorruptedDir(dir) {
 			corruptedDir = true // leave to CSI driver to handle corrupted mount
 			klog.Warning(log("mounter.SetUpAt detected corrupted mount for dir [%s]", dir))
@@ -117,12 +125,13 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 			return errors.New(log("mounter.SetUpAt failed while checking mount status for dir [%s]: %v", dir, err))
 		}
 	}
-
+	// 已经被挂载，而且挂载没有问题，什么都不做
 	if mounted && !corruptedDir {
 		klog.V(4).Info(log("mounter.SetUpAt skipping mount, dir already mounted [%s]", dir))
 		return nil
 	}
 
+	// 从csi驱动表中找到csi驱动端点，然后生成一个csi驱动客户端，该客户端中包含csi驱动通信端点以及一个与csidriver的NodeServer通信的客户端生成器
 	csi, err := c.csiClientGetter.Get()
 	if err != nil {
 		return volumetypes.NewTransientOperationFailure(log("mounter.SetUpAt failed to get CSI client: %v", err))
@@ -131,18 +140,19 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	ctx, cancel := context.WithTimeout(context.Background(), csiTimeout)
 	defer cancel()
 
+	//pvc中的csi或者pv.spec.csi获取csi的信息，二者只会获取一个
 	volSrc, pvSrc, err := getSourceFromSpec(c.spec)
 	if err != nil {
 		return errors.New(log("mounter.SetupAt failed to get CSI persistent source: %v", err))
 	}
 
-	driverName := c.driverName
-	volumeHandle := c.volumeID
-	readOnly := c.readOnly
-	accessMode := api.ReadWriteOnce
+	driverName := c.driverName      //csi驱动名
+	volumeHandle := c.volumeID      //csi卷ID(远程存储唯一标志卷)
+	readOnly := c.readOnly          //是否只读挂载
+	accessMode := api.ReadWriteOnce //默认单点读写?
 
 	var (
-		fsType             string
+		fsType             string //
 		volAttribs         map[string]string
 		nodePublishSecrets map[string]string
 		publishContext     map[string]string
@@ -152,6 +162,7 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	)
 
 	switch {
+	//从pvc中提取CSI信息
 	case volSrc != nil:
 		if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
 			return fmt.Errorf("CSIInlineVolume feature required")
@@ -170,33 +181,37 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 			ns := c.pod.Namespace
 			secretRef = &api.SecretReference{Name: secretName, Namespace: ns}
 		}
+		//从pv中提取csi相关信息
 	case pvSrc != nil:
 		if c.volumeLifecycleMode != storage.VolumeLifecyclePersistent {
 			return fmt.Errorf("unexpected driver mode: %s", c.volumeLifecycleMode)
 		}
 
-		fsType = pvSrc.FSType
+		fsType = pvSrc.FSType //要挂载文件系统类型
 
 		volAttribs = pvSrc.VolumeAttributes
-
+		//卷挂载到容器时存放的验证信息的密钥
 		if pvSrc.NodePublishSecretRef != nil {
 			secretRef = pvSrc.NodePublishSecretRef
 		}
 
 		//TODO (vladimirvivien) implement better AccessModes mapping between k8s and CSI
+		//只使用第一个访问模式?
 		if c.spec.PersistentVolume.Spec.AccessModes != nil {
 			accessMode = c.spec.PersistentVolume.Spec.AccessModes[0]
 		}
-
+		//挂载卷文件系统时的挂载参数
 		mountOptions = c.spec.PersistentVolume.Spec.MountOptions
 
 		// Check for STAGE_UNSTAGE_VOLUME set and populate deviceMountPath if so
+		//检测CSI driver是否支持挂载/卸载pv目录特性
 		stageUnstageSet, err := csi.NodeSupportsStageUnstage(ctx)
 		if err != nil {
 			return errors.New(log("mounter.SetUpAt failed to check for STAGE_UNSTAGE_VOLUME capability: %v", err))
 		}
-
+		//检测CSI driver是否支持挂载卸载容器目录特性
 		if stageUnstageSet {
+			//算出外部CSI卷在节点的挂载目录：/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount
 			deviceMountPath, err = makeDeviceMountPath(c.plugin, c.spec)
 			if err != nil {
 				return errors.New(log("mounter.SetUpAt failed to make device mount path: %v", err))
@@ -204,8 +219,10 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 		}
 
 		// search for attachment by VolumeAttachment.Spec.Source.PersistentVolumeName
+		//有什么用?
 		if c.publishContext == nil {
 			nodeName := string(c.plugin.host.GetNodeName())
+			//通过driver对应的CSIDriver来决定要跳过挂载，如果跳过则什么都不干；否则根据handle/driver/nodename得到对应的VolumeAttachment，返回其中status.AttachmentMetadata信息
 			c.publishContext, err = c.plugin.getPublishContext(c.k8s, volumeHandle, string(driverName), nodeName)
 			if err != nil {
 				// we could have a transient error associated with fetching publish context
@@ -219,6 +236,7 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	}
 
 	// create target_dir before call to NodePublish
+	//创建容器挂载目录
 	if err := os.MkdirAll(dir, 0750); err != nil && !corruptedDir {
 		return errors.New(log("mounter.SetUpAt failed to create dir %#v:  %v", dir, err))
 	}
@@ -226,6 +244,7 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 
 	nodePublishSecrets = map[string]string{}
 	if secretRef != nil {
+		//从指定secret中提取验证信息
 		nodePublishSecrets, err = getCredentialsFromSecret(c.k8s, secretRef)
 		if err != nil {
 			return volumetypes.NewTransientOperationFailure(fmt.Sprintf("fetching NodePublishSecretRef %s/%s failed: %v",
@@ -295,6 +314,7 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	return nil
 }
 
+//? 通过CSIdriver获取卷的信息?
 func (c *csiMountMgr) podAttributes() (map[string]string, error) {
 	kletHost, ok := c.plugin.host.(volume.KubeletVolumeHost)
 	if ok {
@@ -319,7 +339,7 @@ func (c *csiMountMgr) podAttributes() (map[string]string, error) {
 		klog.V(4).Infof(log("CSIDriver %q does not require pod information", c.driverName))
 		return nil, nil
 	}
-
+	//c.Pod信息从哪里来的？
 	attrs := map[string]string{
 		"csi.storage.k8s.io/pod.name":            c.pod.Name,
 		"csi.storage.k8s.io/pod.namespace":       c.pod.Namespace,
@@ -411,8 +431,10 @@ func (c *csiMountMgr) applyFSGroup(fsType string, fsGroup *int64, fsGroupChangeP
 }
 
 // isDirMounted returns the !notMounted result from IsLikelyNotMountPoint check
+// 检测路径是否挂载点
 func isDirMounted(plug *csiPlugin, dir string) (bool, error) {
 	mounter := plug.host.GetMounter(plug.GetPluginName())
+	//检测节点上目录是否挂载点
 	notMnt, err := mounter.IsLikelyNotMountPoint(dir)
 	if err != nil && !os.IsNotExist(err) {
 		klog.Error(log("isDirMounted IsLikelyNotMountPoint test failed for dir [%v]", dir))
@@ -421,12 +443,14 @@ func isDirMounted(plug *csiPlugin, dir string) (bool, error) {
 	return !notMnt, nil
 }
 
+//检测目录路径是否存在有问题的挂载
 func isCorruptedDir(dir string) bool {
 	_, pathErr := mount.PathExists(dir)
 	return pathErr != nil && mount.IsCorruptedMnt(pathErr)
 }
 
 // removeMountDir cleans the mount dir when dir is not mounted and removed the volume data file in dir
+//删除挂载目录，如果仍会有挂载什么都不做（也不去报错)
 func removeMountDir(plug *csiPlugin, mountPath string) error {
 	klog.V(4).Info(log("removing mount path [%s]", mountPath))
 

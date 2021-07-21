@@ -42,6 +42,7 @@ const (
 	TestInformerSyncTimeout = 30 * time.Second
 )
 
+//从指定secret中提取验证信息
 func getCredentialsFromSecret(k8s kubernetes.Interface, secretRef *api.SecretReference) (map[string]string, error) {
 	credentials := map[string]string{}
 	secret, err := k8s.CoreV1().Secrets(secretRef.Namespace).Get(context.TODO(), secretRef.Name, meta.GetOptions{})
@@ -142,6 +143,7 @@ func hasReadWriteOnce(modes []api.PersistentVolumeAccessMode) bool {
 }
 
 // getSourceFromSpec returns either CSIVolumeSource or CSIPersistentVolumeSource, but not both
+//从pvc或者pv中获取到csi的信息
 func getSourceFromSpec(spec *volume.Spec) (*api.CSIVolumeSource, *api.CSIPersistentVolumeSource, error) {
 	if spec == nil {
 		return nil, nil, fmt.Errorf("volume.Spec nil")

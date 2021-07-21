@@ -813,12 +813,14 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	// NewInitializedVolumePluginMgr initializes some storageErrors on the Kubelet runtimeState (in csi_plugin.go init)
 	// which affects node ready status. This function must be called before Kubelet is initialized so that the Node
 	// ReadyState is accurate with the storage state.
-	//创建卷插件管理器
+	// 初始化kubernetes内置的卷插件
+	// kubeDeps.VolumePlugins：kubernetes内置的插件
 	klet.volumePluginMgr, err =
 		NewInitializedVolumePluginMgr(klet, secretManager, configMapManager, tokenManager, kubeDeps.VolumePlugins, kubeDeps.DynamicPluginProber)
 	if err != nil {
 		return nil, err
 	}
+	//管理插件的注册
 	klet.pluginManager = pluginmanager.NewPluginManager(
 		klet.getPluginsRegistrationDir(), /* sockDir */ //默认路径/var/lib/kubelet/plugins_regsitry, 在该目录树下创建非“."的socket文件将认为是注册插件
 		kubeDeps.Recorder,
@@ -1237,8 +1239,8 @@ type Kubelet struct {
 
 	// pluginmanager runs a set of asynchronous loops that figure out which
 	// plugins need to be registered/unregistered based on this node and makes it so.
-	pluginManager pluginmanager.PluginManager
-
+	pluginManager pluginmanager.PluginManager //插件注册管理器。将在/var/lib/kubelet/plugins_registry中创建非“.”socket的插件进行注册
+	// socket移除时,移除该插件的注册.
 	// This flag sets a maximum number of images to report in the node status.
 	nodeStatusMaxImages int32
 

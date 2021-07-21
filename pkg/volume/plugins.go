@@ -155,7 +155,7 @@ type VolumePlugin interface {
 	// CanSupport tests whether the plugin supports a given volume
 	// specification from the API.  The spec pointer should be considered
 	// const.
-	CanSupport(spec *Spec) bool
+	CanSupport(spec *Spec) bool //csi: pv是否非空而且pv.Spe.CSI不为空
 
 	// RequiresRemount returns true if this plugin requires mount calls to be
 	// reexecuted. Atomically updating volumes, like Downward API, depend on
@@ -366,7 +366,7 @@ type VolumeHost interface {
 	// a given plugin may store data.  This directory might not actually
 	// exist on disk yet.  For plugin data that is per-pod, see
 	// GetPodPluginDir().
-	GetPluginDir(pluginName string) string
+	GetPluginDir(pluginName string) string //csi默认是/var/lib/kubelet/plugins/kubernetes.io(不管是什么CSI插件)
 
 	// GetVolumeDevicePluginDir returns the absolute path to a directory
 	// under which a given plugin may store data.
@@ -381,6 +381,8 @@ type VolumeHost interface {
 	// represents the named volume under the named plugin for the given
 	// pod.  If the specified pod does not exist, the result of this call
 	// might not exist.
+	// /var/lib/kubelet/pods/<podID>/volumes/<pluginName>/<volumeName>  用来表示挂载在pod内部的卷
+	// 如果是csi, pluginName为kubernetes.io~csi
 	GetPodVolumeDir(podUID types.UID, pluginName string, volumeName string) string
 
 	// GetPodPluginDir returns the absolute path to a directory under which
@@ -415,7 +417,7 @@ type VolumeHost interface {
 	GetCloudProvider() cloudprovider.Interface
 
 	// Get mounter interface.
-	GetMounter(pluginName string) mount.Interface
+	GetMounter(pluginName string) mount.Interface //主要kubelet支持，其他都是nil
 
 	// Returns the hostname of the host kubelet is running on
 	GetHostName() string
@@ -463,9 +465,10 @@ type VolumePluginMgr struct {
 }
 
 // Spec is an internal representation of a volume.  All API volume types translate to Spec.
+//卷的内部表示
 type Spec struct {
-	Volume                          *v1.Volume
-	PersistentVolume                *v1.PersistentVolume
+	Volume                          *v1.Volume           //在pod.spec.Volumes描述的卷
+	PersistentVolume                *v1.PersistentVolume //pv
 	ReadOnly                        bool
 	InlineVolumeSpecForCSIMigration bool
 }
@@ -585,7 +588,8 @@ func NewSpecFromPersistentVolume(pv *v1.PersistentVolume, readOnly bool) *Spec {
 // InitPlugins initializes each plugin.  All plugins must have unique names.
 // This must be called exactly once before any New* methods are called on any
 // plugins.
-// 注意这个接口即被Kubelet调用，也被ControllerManager调用
+// 注意这个接口即被Kubelet调用，也被ControllerManager(AttachDetachController/ExpandController)调用
+// 为什么会有两处调用？
 func (pm *VolumePluginMgr) InitPlugins(plugins []VolumePlugin, prober DynamicPluginProber, host VolumeHost) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
