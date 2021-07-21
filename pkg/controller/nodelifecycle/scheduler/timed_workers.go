@@ -41,20 +41,27 @@ func NewWorkArgs(name, namespace string) *WorkArgs {
 }
 
 // TimedWorker is a responsible for executing a function no earlier than at FireAt time.
+// 定时工作器. TimedWorker创建时会启动一个异步线程在FireAt执行某项任务. 使用Timer.Stop可以停止该定时任务
 type TimedWorker struct {
-	WorkItem  *WorkArgs
-	CreatedAt time.Time
-	FireAt    time.Time
-	Timer     *time.Timer
+	WorkItem  *WorkArgs   //对应的资源
+	CreatedAt time.Time   //创建时间
+	FireAt    time.Time   //执行时间
+	Timer     *time.Timer //TimedWorker创建时会启动一个异步线程在FireAt执行某项任务. 使用这个Timer.Stop可以停止该定时任务
 }
 
 // CreateWorker creates a TimedWorker that will execute `f` not earlier than `fireAt`.
+// 如果fireAt与creatAt之间没有延时，立即对args执行f操作后返回，不需要创建定时工作器
+// 否则创建一个定时工作器，并开始倒计时。倒计时结束执行f
 func CreateWorker(args *WorkArgs, createdAt time.Time, fireAt time.Time, f func(args *WorkArgs) error) *TimedWorker {
 	delay := fireAt.Sub(createdAt)
+	//没有延时
 	if delay <= 0 {
+		//启动协程处理指定的资源后，返空
 		go f(args)
 		return nil
 	}
+	//在delay后执行f函数,返回的timer用于停止这个定时器。不能用于timer.C
+	//执行time.AfterFunc后就开始倒计时
 	timer := time.AfterFunc(delay, func() { f(args) })
 	return &TimedWorker{
 		WorkItem:  args,
@@ -65,6 +72,7 @@ func CreateWorker(args *WorkArgs, createdAt time.Time, fireAt time.Time, f func(
 }
 
 // Cancel cancels the execution of function by the `TimedWorker`
+// 取消定时任务， 这回
 func (w *TimedWorker) Cancel() {
 	if w != nil {
 		w.Timer.Stop()
@@ -72,15 +80,17 @@ func (w *TimedWorker) Cancel() {
 }
 
 // TimedWorkerQueue keeps a set of TimedWorkers that are still wait for execution.
+// 用来保存等待特定时间执行的工作者表
 type TimedWorkerQueue struct {
 	sync.Mutex
 	// map of workers keyed by string returned by 'KeyFromWorkArgs' from the given worker.
-	workers  map[string]*TimedWorker
-	workFunc func(args *WorkArgs) error
+	workers  map[string]*TimedWorker    //定时工作器表， key是namespace/name。 注意Value可以为nil.因为不需要定时，所以已经执行
+	workFunc func(args *WorkArgs) error //工作函数
 }
 
 // CreateWorkerQueue creates a new TimedWorkerQueue for workers that will execute
 // given function `f`.
+// 创建工作队列并指定处理函数
 func CreateWorkerQueue(f func(args *WorkArgs) error) *TimedWorkerQueue {
 	return &TimedWorkerQueue{
 		workers:  make(map[string]*TimedWorker),
@@ -105,8 +115,9 @@ func (q *TimedWorkerQueue) getWrappedWorkerFunc(key string) func(args *WorkArgs)
 }
 
 // AddWork adds a work to the WorkerQueue which will be executed not earlier than `fireAt`.
+// 当createAt与fireAt同一时间时，不启动定时处理，而是直接处理（也是异步)
 func (q *TimedWorkerQueue) AddWork(args *WorkArgs, createdAt time.Time, fireAt time.Time) {
-	key := args.KeyFromWorkArgs()
+	key := args.KeyFromWorkArgs() //获取工作对象
 	klog.V(4).Infof("Adding TimedWorkerQueue item %v at %v to be fired at %v", key, createdAt, fireAt)
 
 	q.Lock()
@@ -115,11 +126,14 @@ func (q *TimedWorkerQueue) AddWork(args *WorkArgs, createdAt time.Time, fireAt t
 		klog.Warningf("Trying to add already existing work for %+v. Skipping.", args)
 		return
 	}
+	// 如果fireAt与creatAt之间没有延时，立即对args异步执行f操作后返回，不需要创建定时工作器
+	// 否则创建一个定时工作器，并开始倒计时
 	worker := CreateWorker(args, createdAt, fireAt, q.getWrappedWorkerFunc(key))
 	q.workers[key] = worker
 }
 
 // CancelWork removes scheduled function execution from the queue. Returns true if work was cancelled.
+//取消指定定时工作的执行，并从队列中移除
 func (q *TimedWorkerQueue) CancelWork(key string) bool {
 	q.Lock()
 	defer q.Unlock()
@@ -129,6 +143,7 @@ func (q *TimedWorkerQueue) CancelWork(key string) bool {
 		klog.V(4).Infof("Cancelling TimedWorkerQueue item %v at %v", key, time.Now())
 		if worker != nil {
 			result = true
+			//取消指定worker的定时删除动作
 			worker.Cancel()
 		}
 		delete(q.workers, key)

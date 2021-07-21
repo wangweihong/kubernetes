@@ -43,16 +43,19 @@ import (
 // DeletePods will delete all pods from master running on given node,
 // and return true if any pods were deleted, or were found pending
 // deletion.
+// 更新节点上所有Pod的状态为节点丢失,删除除了被daemonset管理(label set match)的Pod以及被标记准备删除的Pod(设置了删除时间）
+// 1. 如果有pod更新状态失败, 2.删除某个Pod失败
 func DeletePods(kubeClient clientset.Interface, pods []*v1.Pod, recorder record.EventRecorder, nodeName, nodeUID string, daemonStore appsv1listers.DaemonSetLister) (bool, error) {
 	remaining := false
 	var updateErrList []error
-
+	//记录删除节点上所有Pod
 	if len(pods) > 0 {
 		RecordNodeEvent(recorder, nodeName, nodeUID, v1.EventTypeNormal, "DeletingAllPods", fmt.Sprintf("Deleting all Pods from Node %v.", nodeName))
 	}
 
 	for i := range pods {
 		// Defensive check, also needed for tests.
+		//非当前节点的Pod，忽略不管
 		if pods[i].Spec.NodeName != nodeName {
 			continue
 		}
@@ -60,6 +63,7 @@ func DeletePods(kubeClient clientset.Interface, pods []*v1.Pod, recorder record.
 		// Pod will be modified, so making copy is required.
 		pod := pods[i].DeepCopy()
 		// Set reason and message in the pod object.
+		// 更新Pod的状态为节点丢失
 		if _, err := SetPodTerminationReason(kubeClient, pod, nodeName); err != nil {
 			if apierrors.IsConflict(err) {
 				updateErrList = append(updateErrList,
@@ -73,6 +77,8 @@ func DeletePods(kubeClient clientset.Interface, pods []*v1.Pod, recorder record.
 			continue
 		}
 		// if the pod is managed by a daemonset, ignore it
+		// 遍历Daemonset,通过label match检测pod是否被daemonset管理(通过pod的ownerReference可能不准确)
+		// 忽略
 		if _, err := daemonStore.GetPodDaemonSets(pod); err == nil {
 			// No error means at least one daemonset was found
 			continue
@@ -80,6 +86,7 @@ func DeletePods(kubeClient clientset.Interface, pods []*v1.Pod, recorder record.
 
 		klog.V(2).Infof("Starting deletion of pod %v/%v", pod.Namespace, pod.Name)
 		recorder.Eventf(pod, v1.EventTypeNormal, "NodeControllerEviction", "Marking for deletion Pod %s from Node %s", pod.Name, nodeName)
+		//
 		if err := kubeClient.CoreV1().Pods(pod.Namespace).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{}); err != nil {
 			if apierrors.IsNotFound(err) {
 				// NotFound error means that pod was already deleted.
@@ -100,6 +107,7 @@ func DeletePods(kubeClient clientset.Interface, pods []*v1.Pod, recorder record.
 // SetPodTerminationReason attempts to set a reason and message in the
 // pod status, updates it in the apiserver, and returns an error if it
 // encounters one.
+// 更新Pod的状态为节点丢失
 func SetPodTerminationReason(kubeClient clientset.Interface, pod *v1.Pod, nodeName string) (*v1.Pod, error) {
 	if pod.Status.Reason == nodepkg.NodeUnreachablePodReason {
 		return pod, nil
@@ -118,6 +126,7 @@ func SetPodTerminationReason(kubeClient clientset.Interface, pod *v1.Pod, nodeNa
 
 // MarkPodsNotReady updates ready status of given pods running on
 // given node from master return true if success
+//更新调度在nodeName节点上Pod的PodReady Condition为False
 func MarkPodsNotReady(kubeClient clientset.Interface, pods []*v1.Pod, nodeName string) error {
 	klog.V(2).Infof("Update ready status of pods on node [%v]", nodeName)
 
@@ -187,12 +196,13 @@ func RecordNodeStatusChange(recorder record.EventRecorder, node *v1.Node, newSta
 
 // SwapNodeControllerTaint returns true in case of success and false
 // otherwise.
+// 通过patch的方式给node新增taint(taintsToAdd),移除taint(taintsToRemove)
 func SwapNodeControllerTaint(kubeClient clientset.Interface, taintsToAdd, taintsToRemove []*v1.Taint, node *v1.Node) bool {
 	for _, taintToAdd := range taintsToAdd {
 		now := metav1.Now()
 		taintToAdd.TimeAdded = &now
 	}
-
+	//通过patch的方式添加节点新的taint
 	err := controller.AddOrUpdateTaintOnNode(kubeClient, node.Name, taintsToAdd...)
 	if err != nil {
 		utilruntime.HandleError(
@@ -204,7 +214,7 @@ func SwapNodeControllerTaint(kubeClient clientset.Interface, taintsToAdd, taints
 		return false
 	}
 	klog.V(4).Infof("Added %+v Taint to Node %v", taintsToAdd, node.Name)
-
+	//通过patch的方式移除节点某些taint
 	err = controller.RemoveTaintOffNode(kubeClient, node.Name, node, taintsToRemove...)
 	if err != nil {
 		utilruntime.HandleError(

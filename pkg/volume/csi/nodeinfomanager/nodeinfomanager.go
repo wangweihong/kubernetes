@@ -103,6 +103,7 @@ type Interface interface {
 }
 
 // NewNodeInfoManager initializes nodeInfoManager
+// 在CSIPluginManager初始化时创建
 func NewNodeInfoManager(
 	nodeName types.NodeName,
 	volumeHost volume.VolumeHost,

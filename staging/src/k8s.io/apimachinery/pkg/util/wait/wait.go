@@ -446,10 +446,12 @@ func ExponentialBackoff(backoff Backoff, condition ConditionFunc) error {
 // window is too short.
 //
 // If you want to Poll something forever, see PollInfinite.
+// 轮询.每隔interval触发condition的执行，直到condition结果为true或者condition执行失败或者超时
 func Poll(interval, timeout time.Duration, condition ConditionFunc) error {
 	return pollInternal(poller(interval, timeout), condition)
 }
 
+// 等待wait特定事件发生后，执行condition逻辑直到condition执行结果为true(执行失败则退出，结果结果不为true则继续执行)
 func pollInternal(wait WaitFunc, condition ConditionFunc) error {
 	done := make(chan struct{})
 	defer close(done)
@@ -466,10 +468,12 @@ func pollInternal(wait WaitFunc, condition ConditionFunc) error {
 // window is too short.
 //
 // If you want to immediately Poll something forever, see PollImmediateInfinite.
+// 先立即执行condition,如果成功或者执行失败则返回。否则每隔interval触发condition的执行，直到condition结果为true或者condition执行失败或者超时
 func PollImmediate(interval, timeout time.Duration, condition ConditionFunc) error {
 	return pollImmediateInternal(poller(interval, timeout), condition)
 }
 
+// 先立即执行condition,如果成功或者执行失败则返回。否则等待wait特定事件发生后，执行condition逻辑直到condition执行结果为true(执行失败则退出，结果结果不为true则继续执行)
 func pollImmediateInternal(wait WaitFunc, condition ConditionFunc) error {
 	done, err := runConditionWithCrashProtection(condition)
 	if err != nil {
@@ -543,7 +547,10 @@ func PollImmediateUntil(interval time.Duration, condition ConditionFunc, stopCh 
 
 // WaitFunc creates a channel that receives an item every time a test
 // should be executed and is closed when the last test should be invoked.
-type WaitFunc func(done <-chan struct{}) <-chan struct{}
+//WaitFunc会一般启动一个协程执行特定的等待逻辑，然后会返回一个chan,用于告知接收者等待逻辑结束。当接收到done信号时停止等待，当等待逻辑执行结束发送信号通知接收者
+//done: 用于接收停止等待的信号
+//返回chan: 当等待结束后告知结束信号
+type WaitFunc func(done <-chan struct{}) <-chan struct{} //poller()会生成一个WaitFunc。
 
 // WaitFor continually checks 'fn' as driven by 'wait'.
 //
@@ -560,23 +567,29 @@ type WaitFunc func(done <-chan struct{}) <-chan struct{}
 // When the done channel is closed, because the golang `select` statement is
 // "uniform pseudo-random", the `fn` might still run one or multiple time,
 // though eventually `WaitFor` will return.
+// 等待wait特定事件发生后，执行fn逻辑直到fn执行结果达到预期（执行失败则退出，结果未达到预期则继续)。 如果等待期间接收到done信号，结束等待报告超时
 func WaitFor(wait WaitFunc, fn ConditionFunc, done <-chan struct{}) error {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
-	c := wait(stopCh)
+	c := wait(stopCh) //启动等待协程
 	for {
 		select {
+		//接收到等待结束信号，执行逻辑fsn
 		case _, open := <-c:
+			//执行
 			ok, err := runConditionWithCrashProtection(fn)
+			//执行遇到错误，报错退出
 			if err != nil {
 				return err
 			}
+			// 正常执行而且结果达到预期
 			if ok {
 				return nil
 			}
 			if !open {
 				return ErrWaitTimeout
 			}
+			// 正常执行但结果未达到预期,继续等待下次执行
 		case <-done:
 			return ErrWaitTimeout
 		}
@@ -593,13 +606,15 @@ func WaitFor(wait WaitFunc, fn ConditionFunc, done <-chan struct{}) error {
 //
 // Output ticks are not buffered. If the channel is not ready to receive an
 // item, the tick is skipped.
+//这个是个好思路
+//提供一个WaitFunc: 1. 启动一个协程有个interval的定时器周期向chan发送信号，2. 超时退出 3. 接收到done信号退出
 func poller(interval, timeout time.Duration) WaitFunc {
 	return WaitFunc(func(done <-chan struct{}) <-chan struct{} {
 		ch := make(chan struct{})
 
 		go func() {
 			defer close(ch)
-
+			//启动定时器
 			tick := time.NewTicker(interval)
 			defer tick.Stop()
 
@@ -615,6 +630,7 @@ func poller(interval, timeout time.Duration) WaitFunc {
 
 			for {
 				select {
+				// 定时器周期向ch发送信号
 				case <-tick.C:
 					// If the consumer isn't ready for this signal drop it and
 					// check the other channels.
@@ -622,8 +638,10 @@ func poller(interval, timeout time.Duration) WaitFunc {
 					case ch <- struct{}{}:
 					default:
 					}
+					//超时
 				case <-after:
 					return
+					//接收到结束信号
 				case <-done:
 					return
 				}

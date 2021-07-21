@@ -321,6 +321,7 @@ func TaintExists(taints []v1.Taint, taintToFind *v1.Taint) bool {
 	return false
 }
 
+//比较t1/t2中新增了哪些taint,移除了哪些taint
 func TaintSetDiff(t1, t2 []v1.Taint) (taintsToAdd []*v1.Taint, taintsToRemove []*v1.Taint) {
 	for _, taint := range t1 {
 		if !TaintExists(t2, &taint) {
@@ -339,6 +340,7 @@ func TaintSetDiff(t1, t2 []v1.Taint) (taintsToAdd []*v1.Taint, taintsToRemove []
 	return
 }
 
+//通过fn来给过滤taint
 func TaintSetFilter(taints []v1.Taint, fn func(*v1.Taint) bool) []v1.Taint {
 	res := []v1.Taint{}
 

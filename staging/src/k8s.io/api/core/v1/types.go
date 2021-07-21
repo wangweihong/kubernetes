@@ -2785,7 +2785,7 @@ const (
 
 	// Evict any already-running pods that do not tolerate the taint.
 	// Currently enforced by NodeController.
-	TaintEffectNoExecute TaintEffect = "NoExecute"
+	TaintEffectNoExecute TaintEffect = "NoExecute" // 不能容忍该污点的都将被从节点中驱逐(delete pod)
 )
 
 // The pod this Toleration is attached to tolerates any taint that matches

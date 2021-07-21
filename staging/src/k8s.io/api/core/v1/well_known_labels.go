@@ -21,7 +21,7 @@ const (
 
 	LabelZoneFailureDomain       = "failure-domain.beta.kubernetes.io/zone"
 	LabelZoneRegion              = "failure-domain.beta.kubernetes.io/region"
-	LabelZoneFailureDomainStable = "topology.kubernetes.io/zone"
+	LabelZoneFailureDomainStable = "topology.kubernetes.io/zone" //https://kubernetes.io/zh/docs/reference/labels-annotations-taints/#topologykubernetesiozone 由cloudprovider提供
 	LabelZoneRegionStable        = "topology.kubernetes.io/region"
 
 	LabelInstanceType       = "beta.kubernetes.io/instance-type"
