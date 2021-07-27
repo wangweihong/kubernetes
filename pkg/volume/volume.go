@@ -27,6 +27,7 @@ import (
 
 // Volume represents a directory used by pods or hosts on a node. All method
 // implementations of methods in the volume interface must be idempotent.
+// Volume表示节点上一个被Pod以及主机使用的目录。
 type Volume interface {
 	// GetPath returns the path to which the volume should be mounted for the
 	// pod.
@@ -43,6 +44,7 @@ type BlockVolume interface {
 	// GetGlobalMapPath returns a global map path which contains
 	// bind mount associated to a block device.
 	// ex. plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
+	// CSI:/var/lib/kubelet/plugins/<pluginsName>/volumeDevices/<volID>
 	GetGlobalMapPath(spec *Spec) (string, error)
 	// GetPodDeviceMapPath returns a pod device map path
 	// and name of a symbolic link associated to a block device.

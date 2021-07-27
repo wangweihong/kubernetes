@@ -51,7 +51,7 @@ const (
 
 	csiTimeout      = 2 * time.Minute
 	volNameSep      = "^"
-	volDataFileName = "vol_data.json"
+	volDataFileName = "vol_data.json" // /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/vol_data.json
 	fsTypeBlockName = "block"
 
 	// CsiResyncPeriod is default resync period duration
@@ -397,7 +397,7 @@ func (p *csiPlugin) NewMounter(
 		}
 	case pvSrc != nil:
 		driverName = pvSrc.Driver         //CSIDriver驱动名
-		volumeHandle = pvSrc.VolumeHandle // 对应的存储卷的唯一标识符
+		volumeHandle = pvSrc.VolumeHandle //对应的后端存储卷的唯一标识符
 		readOnly = spec.ReadOnly          //只读挂载
 	default:
 		return nil, errors.New(log("volume source not found in volume.Spec"))
@@ -440,9 +440,9 @@ func (p *csiPlugin) NewMounter(
 	mounter.csiClientGetter.driverName = csiDriverName(driverName)
 
 	// Save volume info in pod dir
-	dir := mounter.GetPath()
+	dir := mounter.GetPath()     // /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount
 	dataDir := filepath.Dir(dir) // dropoff /mount at end
-
+	//创建挂载路径目录
 	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, errors.New(log("failed to create dir %#v:  %v", dataDir, err))
 	}
@@ -453,16 +453,16 @@ func (p *csiPlugin) NewMounter(
 	// persist volume info data for teardown
 	node := string(p.host.GetNodeName())
 	volData := map[string]string{
-		volDataKey.specVolID:           spec.Name(),
-		volDataKey.volHandle:           volumeHandle,
-		volDataKey.driverName:          driverName,
-		volDataKey.nodeName:            node,
+		volDataKey.specVolID:           spec.Name(),  // 要么是pod.spec.volume名，要么是pv名
+		volDataKey.volHandle:           volumeHandle, // 后端存储唯一标志
+		volDataKey.driverName:          driverName,   // 驱动名
+		volDataKey.nodeName:            node,         // 主机名
 		volDataKey.volumeLifecycleMode: string(volumeLifecycleMode),
 	}
-
+	// csi-<sha256(volName,csiDriverName,NodeName)>
 	attachID := getAttachmentName(volumeHandle, driverName, node)
 	volData[volDataKey.attachmentID] = attachID
-
+	//生成/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/vol_data.json
 	err = saveVolumeData(dataDir, volDataFileName, volData)
 	defer func() {
 		// Only if there was an error and volume operation was considered
@@ -625,7 +625,7 @@ func (p *csiPlugin) CanAttach(spec *volume.Spec) (bool, error) {
 	}
 
 	driverName := pvSrc.Driver
-
+	//通过CSIDriver.spec.AttachRequired来决定是否要
 	skipAttach, err := p.skipAttach(driverName)
 	if err != nil {
 		return false, err
@@ -823,6 +823,7 @@ func (p *csiPlugin) skipAttach(driver string) (bool, error) {
 		}
 		return false, err
 	}
+	// csiDriver中指定是否卷必须要先附加到节点
 	if csiDriver.Spec.AttachRequired != nil && *csiDriver.Spec.AttachRequired == false {
 		return true, nil
 	}

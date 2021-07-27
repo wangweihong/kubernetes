@@ -122,6 +122,7 @@ func (kvh *kubeletVolumeHost) SetKubeletError(err error) {
 	kvh.kubelet.runtimeState.setStorageState(err)
 }
 
+// /var/lib/kubelet/plugins/<pluginsName>/volumeDevices
 func (kvh *kubeletVolumeHost) GetVolumeDevicePluginDir(pluginName string) string {
 	return kvh.kubelet.getVolumeDevicePluginDir(pluginName)
 }
@@ -139,10 +140,13 @@ func (kvh *kubeletVolumeHost) GetPodVolumeDir(podUID types.UID, pluginName strin
 	return dir
 }
 
+// /var/lib/kubelet/pods/<podID>/volumeDevices/<pluginName>
 func (kvh *kubeletVolumeHost) GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string {
 	return kvh.kubelet.getPodVolumeDeviceDir(podUID, pluginName)
 }
 
+// /var/lib/kubelet/pods/<podID>/plugins/<pluginName> 用来存放指定的Pod需要持久化的数据
+// 如EmptyDir
 func (kvh *kubeletVolumeHost) GetPodPluginDir(podUID types.UID, pluginName string) string {
 	return kvh.kubelet.getPodPluginDir(podUID, pluginName)
 }

@@ -846,7 +846,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klet.containerRuntime,
 		kubeDeps.Mounter,
 		kubeDeps.HostUtil,
-		klet.getPodsDir(),
+		klet.getPodsDir(), ///var/lib/kubelet/pods
 		kubeDeps.Recorder,
 		experimentalCheckNodeCapabilitiesBeforeMount,
 		keepTerminatedPodVolumes,

@@ -48,7 +48,7 @@ import (
 // will also be removed.
 type Manager interface {
 	// GetPods returns the regular pods bound to the kubelet and their spec.
-	GetPods() []*v1.Pod
+	GetPods() []*v1.Pod // 绑定到当前kubele的Pod
 	// GetPodByFullName returns the (non-mirror) pod that matches full name, as well as
 	// whether the pod was found.
 	GetPodByFullName(podFullName string) (*v1.Pod, bool)

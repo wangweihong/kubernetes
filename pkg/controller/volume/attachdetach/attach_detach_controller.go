@@ -711,6 +711,7 @@ func (adc *attachDetachController) processVolumesInUse(
 // In the reconciler, the logic checks if the volume is present in the DSW;
 //   if yes, the reconciler will attempt attach on the volume;
 //   if not (could be a dangling attachment), the reconciler will detach this volume.
+// 这里就会和PluginManager打交道来获取对应的插件处理
 func (adc *attachDetachController) processVolumeAttachments() error {
 	vas, err := adc.volumeAttachmentLister.List(labels.Everything())
 	if err != nil {
@@ -731,7 +732,9 @@ func (adc *attachDetachController) processVolumeAttachments() error {
 			klog.Errorf("Unable to lookup pv object for: %q, err: %v", *pvName, err)
 			continue
 		}
+		//创建卷在kubelet的内部表示，默认是只读?
 		volumeSpec := volume.NewSpecFromPersistentVolume(pv, false)
+		//
 		plugin, err := adc.volumePluginMgr.FindAttachablePluginBySpec(volumeSpec)
 		if err != nil || plugin == nil {
 			// Currently VA objects are created for CSI volumes only. nil plugin is unexpected, generate a warning

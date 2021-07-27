@@ -43,10 +43,11 @@ import (
 // Note: This is distinct from the ActualStateOfWorld implemented by the
 // attach/detach controller. They both keep track of different objects. This
 // contains kubelet volume manager specific state.
+//用来抽象实际已经附加到节点以及挂载到Pod内部的卷
 type ActualStateOfWorld interface {
 	// ActualStateOfWorld must implement the methods required to allow
 	// operationexecutor to interact with it.
-	operationexecutor.ActualStateOfWorldMounterUpdater
+	operationexecutor.ActualStateOfWorldMounterUpdater //负责更新卷的挂载状态/挂载路径
 
 	// ActualStateOfWorld must implement the methods required to allow
 	// operationexecutor to interact with it.
@@ -91,7 +92,7 @@ type ActualStateOfWorld interface {
 	// attached volumes, this is a no-op.
 	// If a volume with the name volumeName exists and its list of mountedPods
 	// is not empty, an error is returned.
-	DeleteVolume(volumeName v1.UniqueVolumeName) error
+	DeleteVolume(volumeName v1.UniqueVolumeName) error // 如果卷当前没有挂载到任何Pod内部，则将从附加卷表中移除；如果仍有挂载到Pod内部，则删除
 
 	// PodExistsInVolume returns true if the given pod exists in the list of
 	// mountedPods for the given volume in the cache, indicating that the volume
@@ -120,21 +121,21 @@ type ActualStateOfWorld interface {
 	// VolumeExists returns true if the given volume exists in the list of
 	// attached volumes in the cache, indicating the volume is attached to this
 	// node.
-	VolumeExists(volumeName v1.UniqueVolumeName) bool
+	VolumeExists(volumeName v1.UniqueVolumeName) bool //卷是否已经成功附属到节点上
 
 	// GetMountedVolumes generates and returns a list of volumes and the pods
 	// they are successfully attached and mounted for based on the current
 	// actual state of the world.
-	GetMountedVolumes() []MountedVolume
+	GetMountedVolumes() []MountedVolume //找到已经挂载到Pod内部的卷
 
 	// GetAllMountedVolumes returns list of all possibly mounted volumes including
 	// those that are in VolumeMounted state and VolumeMountUncertain state.
-	GetAllMountedVolumes() []MountedVolume
+	GetAllMountedVolumes() []MountedVolume //找到已经挂载到以及可能已经挂载到Pod内部的卷
 
 	// GetMountedVolumesForPod generates and returns a list of volumes that are
 	// successfully attached and mounted for the specified pod based on the
 	// current actual state of the world.
-	GetMountedVolumesForPod(podName volumetypes.UniquePodName) []MountedVolume
+	GetMountedVolumesForPod(podName volumetypes.UniquePodName) []MountedVolume //获取实际已附属到节点上的卷中哪些卷已经挂载到Pod内部
 
 	// GetGloballyMountedVolumes generates and returns a list of all attached
 	// volumes that are globally mounted. This list can be used to determine
@@ -161,6 +162,8 @@ type ActualStateOfWorld interface {
 }
 
 // MountedVolume represents a volume that has successfully been mounted to a pod.
+//用来描述一个挂载到Pod的卷。其由AttachedMount以及AttachedMount.MountedPod[]的信息组成
+// 见getMountedVolume()
 type MountedVolume struct {
 	operationexecutor.MountedVolume
 }
@@ -181,6 +184,7 @@ func (av AttachedVolume) DeviceMayBeMounted() bool {
 }
 
 // NewActualStateOfWorld returns a new instance of ActualStateOfWorld.
+// 管理已经附加到节点上的卷以及卷和Pod的挂载
 func NewActualStateOfWorld(
 	nodeName types.NodeName,
 	volumePluginMgr *volume.VolumePluginMgr) ActualStateOfWorld {
@@ -207,7 +211,7 @@ func IsRemountRequiredError(err error) bool {
 
 type actualStateOfWorld struct {
 	// nodeName is the name of this node. This value is passed to Attach/Detach
-	nodeName types.NodeName
+	nodeName types.NodeName //当前节点名
 
 	// attachedVolumes is a map containing the set of volumes the kubelet volume
 	// manager believes to be successfully attached to this node. Volume types
@@ -215,11 +219,12 @@ type actualStateOfWorld struct {
 	// state by default.
 	// The key in this map is the name of the volume and the value is an object
 	// containing more information about the attached volume.
-	attachedVolumes map[v1.UniqueVolumeName]attachedVolume
+	attachedVolumes map[v1.UniqueVolumeName]attachedVolume //实际已附加到主机上的卷（注意未必挂载到Pod内部）
+	//attachedVolume有一个mountedPods表记录当前卷已挂载到Pod内部的记录
 
 	// volumePluginMgr is the volume plugin manager used to create volume
 	// plugin objects.
-	volumePluginMgr *volume.VolumePluginMgr
+	volumePluginMgr *volume.VolumePluginMgr //和插件打交道
 	sync.RWMutex
 }
 
@@ -234,14 +239,15 @@ type attachedVolume struct {
 	// successfully mounted to. The key in this map is the name of the pod and
 	// the value is a mountedPod object containing more information about the
 	// pod.
-	mountedPods map[volumetypes.UniquePodName]mountedPod
+	mountedPods map[volumetypes.UniquePodName]mountedPod //当前卷已经成功挂载到哪些Pod中
+	// 当该表中仍有记录时, 无法将卷从 cache.attachedVolume中移除
 
 	// spec is the volume spec containing the specification for this volume.
 	// Used to generate the volume plugin object, and passed to plugin methods.
 	// In particular, the Unmount method uses spec.Name() as the volumeSpecName
 	// in the mount path:
 	// /var/lib/kubelet/pods/{podUID}/volumes/{escapeQualifiedPluginName}/{volumeSpecName}/
-	spec *volume.Spec
+	spec *volume.Spec //卷的内部表示 卷要么来自PV,要么来自pod.spec.volumes[]
 
 	// pluginName is the Unescaped Qualified name of the volume plugin used to
 	// attach and mount this volume. It is stored separately in case the full
@@ -252,7 +258,7 @@ type attachedVolume struct {
 
 	// pluginIsAttachable indicates the volume plugin used to attach and mount
 	// this volume implements the volume.Attacher interface
-	pluginIsAttachable bool
+	pluginIsAttachable bool //卷插件有没有实现附加到节点的接口(这里是为了区分emptydir等这类无需附加到主机)
 
 	// deviceMountState stores information that tells us if device is mounted
 	// globally or not
@@ -260,15 +266,16 @@ type attachedVolume struct {
 
 	// devicePath contains the path on the node where the volume is attached for
 	// attachable volumes
-	devicePath string
+	devicePath string //卷在当前节点的附加路径
 
 	// deviceMountPath contains the path on the node where the device should
 	// be mounted after it is attached.
-	deviceMountPath string
+	deviceMountPath string //卷在当前节点的附加路径，(CSI NodeStageVolume的目标路径)
 }
 
 // The mountedPod object represents a pod for which the kubelet volume manager
 // believes the underlying volume has been successfully been mounted.
+// 用来描述pod和卷的挂载关系
 type mountedPod struct {
 	// the name of the pod
 	podName volumetypes.UniquePodName
@@ -287,7 +294,7 @@ type mountedPod struct {
 	// In particular, the Unmount method uses spec.Name() as the volumeSpecName
 	// in the mount path:
 	// /var/lib/kubelet/pods/{podUID}/volumes/{escapeQualifiedPluginName}/{volumeSpecName}/
-	volumeSpec *volume.Spec
+	volumeSpec *volume.Spec //卷在kubelet的内部表示.卷要么是PV要么pod.spec.volumes[]
 
 	// outerVolumeSpecName is the volume.Spec.Name() of the volume as referenced
 	// directly in the pod. If the volume was referenced through a persistent
@@ -308,29 +315,33 @@ type mountedPod struct {
 
 	// fsResizeRequired indicates the underlying volume has been successfully
 	// mounted to this pod but its size has been expanded after that.
-	fsResizeRequired bool
+	fsResizeRequired bool // CSI插件在扩容后会返回一个标志告知扩容完成后文件系统是否需要Resize.
 
 	// volumeMountStateForPod stores state of volume mount for the pod. if it is:
 	//   - VolumeMounted: means volume for pod has been successfully mounted
 	//   - VolumeMountUncertain: means volume for pod may not be mounted, but it must be unmounted
-	volumeMountStateForPod operationexecutor.VolumeMountState
+	volumeMountStateForPod operationexecutor.VolumeMountState // 卷在Pod中挂载状态
 }
 
+//什么都不做
 func (asw *actualStateOfWorld) MarkVolumeAsAttached(
 	volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, _ types.NodeName, devicePath string) error {
 	return asw.addVolume(volumeName, volumeSpec, devicePath)
 }
 
+//什么都不做
 func (asw *actualStateOfWorld) MarkVolumeAsUncertain(
 	volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, _ types.NodeName) error {
 	return nil
 }
 
+// 如果卷当前没有挂载到Pod内部，则将从附加卷表中移除；如果仍挂载到Pod内部，则什么都不做
 func (asw *actualStateOfWorld) MarkVolumeAsDetached(
 	volumeName v1.UniqueVolumeName, nodeName types.NodeName) {
 	asw.DeleteVolume(volumeName)
 }
 
+// 将Pod的挂载信息添加到卷的pod挂载表中
 func (asw *actualStateOfWorld) MarkVolumeAsMounted(markVolumeOpts operationexecutor.MarkVolumeOpts) error {
 	return asw.AddPodToVolume(markVolumeOpts)
 }
@@ -344,31 +355,37 @@ func (asw *actualStateOfWorld) RemoveVolumeFromReportAsAttached(volumeName v1.Un
 	return nil
 }
 
+//如果卷已经附加到节点上且pod挂载列表中包含podName,则将该Pod从该卷挂载表中移除；如果卷没有附加到节点，则什么都不做
 func (asw *actualStateOfWorld) MarkVolumeAsUnmounted(
 	podName volumetypes.UniquePodName, volumeName v1.UniqueVolumeName) error {
 	return asw.DeletePodFromVolume(podName, volumeName)
 }
 
+//设置附加到节点上的卷的挂载状态为完全挂载和挂载设备路径
 func (asw *actualStateOfWorld) MarkDeviceAsMounted(
 	volumeName v1.UniqueVolumeName, devicePath, deviceMountPath string) error {
 	return asw.SetDeviceMountState(volumeName, operationexecutor.DeviceGloballyMounted, devicePath, deviceMountPath)
 }
 
+//设置附加到节点上的卷的挂载状态为挂载未确定和挂载设备路径
 func (asw *actualStateOfWorld) MarkDeviceAsUncertain(
 	volumeName v1.UniqueVolumeName, devicePath, deviceMountPath string) error {
 	return asw.SetDeviceMountState(volumeName, operationexecutor.DeviceMountUncertain, devicePath, deviceMountPath)
 }
 
+// 将Pod的挂载信息添加到卷的pod挂载表中，挂载状态设置为未确定
 func (asw *actualStateOfWorld) MarkVolumeMountAsUncertain(markVolumeOpts operationexecutor.MarkVolumeOpts) error {
 	markVolumeOpts.VolumeMountState = operationexecutor.VolumeMountUncertain
 	return asw.AddPodToVolume(markVolumeOpts)
 }
 
+// 将Pod的挂载信息添加到卷的pod挂载表中，挂载状态设置为未挂载
 func (asw *actualStateOfWorld) MarkDeviceAsUnmounted(
 	volumeName v1.UniqueVolumeName) error {
 	return asw.SetDeviceMountState(volumeName, operationexecutor.DeviceNotMounted, "", "")
 }
 
+//获取卷的挂载状态
 func (asw *actualStateOfWorld) GetDeviceMountState(volumeName v1.UniqueVolumeName) operationexecutor.DeviceMountState {
 	asw.RLock()
 	defer asw.RUnlock()
@@ -381,6 +398,7 @@ func (asw *actualStateOfWorld) GetDeviceMountState(volumeName v1.UniqueVolumeNam
 	return volumeObj.deviceMountState
 }
 
+//获取卷在Pod的挂载状态
 func (asw *actualStateOfWorld) GetVolumeMountState(volumeName v1.UniqueVolumeName, podName volumetypes.UniquePodName) operationexecutor.VolumeMountState {
 	asw.RLock()
 	defer asw.RUnlock()
@@ -407,7 +425,7 @@ func (asw *actualStateOfWorld) addVolume(
 	volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, devicePath string) error {
 	asw.Lock()
 	defer asw.Unlock()
-
+	// 找到卷对应的插件
 	volumePlugin, err := asw.volumePluginMgr.FindPluginBySpec(volumeSpec)
 	if err != nil || volumePlugin == nil {
 		return fmt.Errorf(
@@ -455,6 +473,7 @@ func (asw *actualStateOfWorld) addVolume(
 	return nil
 }
 
+// 将Pod的挂载信息添加到卷的pod挂载表中
 func (asw *actualStateOfWorld) AddPodToVolume(markVolumeOpts operationexecutor.MarkVolumeOpts) error {
 	podName := markVolumeOpts.PodName
 	podUID := markVolumeOpts.PodUID
@@ -495,6 +514,7 @@ func (asw *actualStateOfWorld) AddPodToVolume(markVolumeOpts operationexecutor.M
 	return nil
 }
 
+// CSI插件在扩容后会返回一个标志告知扩容完成后文件系统是否需要Resize. 这里标志已经重置过了。
 func (asw *actualStateOfWorld) MarkVolumeAsResized(
 	podName volumetypes.UniquePodName,
 	volumeName v1.UniqueVolumeName) error {
@@ -518,17 +538,20 @@ func (asw *actualStateOfWorld) MarkVolumeAsResized(
 
 	klog.V(5).Infof("Volume %s(OuterVolumeSpecName %s) of pod %s has been resized",
 		volumeName, podObj.outerVolumeSpecName, podName)
-	podObj.fsResizeRequired = false
+	podObj.fsResizeRequired = false //设置不需要
 	asw.attachedVolumes[volumeName].mountedPods[podName] = podObj
 	return nil
 }
 
+// 当存在卷挂载到指定Pod时, 根据卷的插件来设置pod挂载的RequireRemount标志
 func (asw *actualStateOfWorld) MarkRemountRequired(
 	podName volumetypes.UniquePodName) {
 	asw.Lock()
 	defer asw.Unlock()
+	// 如果有卷挂载到指定的Pod,
 	for volumeName, volumeObj := range asw.attachedVolumes {
 		if podObj, podExists := volumeObj.mountedPods[podName]; podExists {
+			//找到卷对应的插件
 			volumePlugin, err :=
 				asw.volumePluginMgr.FindPluginBySpec(podObj.volumeSpec)
 			if err != nil || volumePlugin == nil {
@@ -541,7 +564,7 @@ func (asw *actualStateOfWorld) MarkRemountRequired(
 					podObj.volumeSpec.Name())
 				continue
 			}
-
+			// CSI插件/EmptyDIr默认为False;ConfigMap/Secret默认设置为True
 			if volumePlugin.RequiresRemount() {
 				podObj.remountRequired = true
 				asw.attachedVolumes[volumeName].mountedPods[podName] = podObj
@@ -550,24 +573,26 @@ func (asw *actualStateOfWorld) MarkRemountRequired(
 	}
 }
 
+// 卷插件如果支持节点扩容以及Resize,则设置标志fsResizeRequired
 func (asw *actualStateOfWorld) MarkFSResizeRequired(
 	volumeName v1.UniqueVolumeName,
 	podName volumetypes.UniquePodName) {
 	asw.Lock()
 	defer asw.Unlock()
+	//找到附加到当前节点上的卷
 	volumeObj, volumeExists := asw.attachedVolumes[volumeName]
 	if !volumeExists {
 		klog.Warningf("MarkFSResizeRequired for volume %s failed as volume not exist", volumeName)
 		return
 	}
-
+	//卷是否挂载到Pod内部
 	podObj, podExists := volumeObj.mountedPods[podName]
 	if !podExists {
 		klog.Warningf("MarkFSResizeRequired for volume %s failed "+
 			"as pod(%s) not exist", volumeName, podName)
 		return
 	}
-
+	//找到卷对应的插件，确认是否支持扩容
 	volumePlugin, err :=
 		asw.volumePluginMgr.FindNodeExpandablePluginBySpec(podObj.volumeSpec)
 	if err != nil || volumePlugin == nil {
@@ -590,6 +615,7 @@ func (asw *actualStateOfWorld) MarkFSResizeRequired(
 	}
 }
 
+//设置卷的挂载状态和挂载路径
 func (asw *actualStateOfWorld) SetDeviceMountState(
 	volumeName v1.UniqueVolumeName, deviceMountState operationexecutor.DeviceMountState, devicePath, deviceMountPath string) error {
 	asw.Lock()
@@ -611,18 +637,19 @@ func (asw *actualStateOfWorld) SetDeviceMountState(
 	return nil
 }
 
+//如果卷已经附加到节点上且pod挂载列表中包含podName,则将该Pod从该卷挂载表中移除
 func (asw *actualStateOfWorld) DeletePodFromVolume(
 	podName volumetypes.UniquePodName, volumeName v1.UniqueVolumeName) error {
 	asw.Lock()
 	defer asw.Unlock()
-
+	//卷是否已经附加到节点
 	volumeObj, volumeExists := asw.attachedVolumes[volumeName]
 	if !volumeExists {
 		return fmt.Errorf(
 			"no volume with the name %q exists in the list of attached volumes",
 			volumeName)
 	}
-
+	//卷是否挂载到指定的Pod内部
 	_, podExists := volumeObj.mountedPods[podName]
 	if podExists {
 		delete(asw.attachedVolumes[volumeName].mountedPods, podName)
@@ -631,6 +658,7 @@ func (asw *actualStateOfWorld) DeletePodFromVolume(
 	return nil
 }
 
+// 如果卷当前没有挂载到Pod内部，则将从附加卷表中移除；如果仍挂载到Pod内部，则删除
 func (asw *actualStateOfWorld) DeleteVolume(volumeName v1.UniqueVolumeName) error {
 	asw.Lock()
 	defer asw.Unlock()
@@ -639,7 +667,7 @@ func (asw *actualStateOfWorld) DeleteVolume(volumeName v1.UniqueVolumeName) erro
 	if !volumeExists {
 		return nil
 	}
-
+	// volume仍然挂载
 	if len(volumeObj.mountedPods) != 0 {
 		return fmt.Errorf(
 			"failed to DeleteVolume %q, it still has %v mountedPods",
@@ -651,6 +679,7 @@ func (asw *actualStateOfWorld) DeleteVolume(volumeName v1.UniqueVolumeName) erro
 	return nil
 }
 
+//如果卷有挂载到Pod中, 返回pod是否需要重挂/卷
 func (asw *actualStateOfWorld) PodExistsInVolume(
 	podName volumetypes.UniquePodName,
 	volumeName v1.UniqueVolumeName) (bool, string, error) {
@@ -693,6 +722,7 @@ func (asw *actualStateOfWorld) VolumeExistsWithSpecName(podName volumetypes.Uniq
 	return false
 }
 
+//卷是否已经附属到节点上
 func (asw *actualStateOfWorld) VolumeExists(
 	volumeName v1.UniqueVolumeName) bool {
 	asw.RLock()
@@ -702,6 +732,7 @@ func (asw *actualStateOfWorld) VolumeExists(
 	return volumeExists
 }
 
+//获取成功挂载到Pod内部的卷和Pod一起生成的挂载卷列表
 func (asw *actualStateOfWorld) GetMountedVolumes() []MountedVolume {
 	asw.RLock()
 	defer asw.RUnlock()
@@ -719,6 +750,7 @@ func (asw *actualStateOfWorld) GetMountedVolumes() []MountedVolume {
 }
 
 // GetAllMountedVolumes returns all volumes which could be locally mounted for a pod.
+//获取挂载到Pod内部成功或者挂载的卷和Pod一起生成挂载卷列表
 func (asw *actualStateOfWorld) GetAllMountedVolumes() []MountedVolume {
 	asw.RLock()
 	defer asw.RUnlock()
@@ -738,12 +770,14 @@ func (asw *actualStateOfWorld) GetAllMountedVolumes() []MountedVolume {
 	return mountedVolume
 }
 
+// 找到已附属到节点上的卷中已经挂载到Pod中卷
 func (asw *actualStateOfWorld) GetMountedVolumesForPod(
 	podName volumetypes.UniquePodName) []MountedVolume {
 	asw.RLock()
 	defer asw.RUnlock()
 	mountedVolume := make([]MountedVolume, 0 /* len */, len(asw.attachedVolumes) /* cap */)
 	for _, volumeObj := range asw.attachedVolumes {
+		// 同一个卷可以挂载在多个Pod内部
 		for mountedPodName, podObj := range volumeObj.mountedPods {
 			if mountedPodName == podName && podObj.volumeMountStateForPod == operationexecutor.VolumeMounted {
 				mountedVolume = append(
@@ -894,6 +928,7 @@ func IsFSResizeRequiredError(err error) bool {
 
 // getMountedVolume constructs and returns a MountedVolume object from the given
 // mountedPod and attachedVolume objects.
+// 结合Attached Volume和挂载的Pod的信息构建一个描述Pod的挂载卷信息。
 func getMountedVolume(
 	mountedPod *mountedPod, attachedVolume *attachedVolume) MountedVolume {
 	return MountedVolume{

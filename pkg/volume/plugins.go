@@ -160,7 +160,7 @@ type VolumePlugin interface {
 	// RequiresRemount returns true if this plugin requires mount calls to be
 	// reexecuted. Atomically updating volumes, like Downward API, depend on
 	// this to update the contents of the volume.
-	RequiresRemount() bool
+	RequiresRemount() bool //重新执行挂载， CSI插件/EmptyDIr默认为False;ConfigMap/Secret默认设置为True
 
 	// NewMounter creates a new volume.Mounter from an API specification.
 	// Ownership of the spec pointer in *not* transferred.
@@ -266,7 +266,7 @@ type ExpandableVolumePlugin interface {
 // require expansion on the node via NodeExpand call.
 type NodeExpandableVolumePlugin interface {
 	VolumePlugin
-	RequiresFSResize() bool
+	RequiresFSResize() bool // 调用CSIPlugin的NodeExpandVolume后,插件会返回一个标志告知后端卷已经成功扩容后是否需要进行Resize来调整文件系统容量。
 	// NodeExpand expands volume on given deviceMountPath and returns true if resize is successful.
 	NodeExpand(resizeOptions NodeResizeOptions) (bool, error)
 }
@@ -455,9 +455,10 @@ type VolumeHost interface {
 }
 
 // VolumePluginMgr tracks registered plugins.
+//kubelet内部的插件管理
 type VolumePluginMgr struct {
 	mutex                     sync.Mutex
-	plugins                   map[string]VolumePlugin
+	plugins                   map[string]VolumePlugin //
 	prober                    DynamicPluginProber
 	probedPlugins             map[string]VolumePlugin
 	loggedDeprecationWarnings sets.String
@@ -465,15 +466,17 @@ type VolumePluginMgr struct {
 }
 
 // Spec is an internal representation of a volume.  All API volume types translate to Spec.
-//卷的内部表示
+//卷的内部表示 卷要么来自PV,要么来自pod.spec.volumes[]
+//创建接口1：NewSpecFromPersistentVolume()
 type Spec struct {
 	Volume                          *v1.Volume           //在pod.spec.Volumes描述的卷
 	PersistentVolume                *v1.PersistentVolume //pv
-	ReadOnly                        bool
+	ReadOnly                        bool                 //卷是否只读.
 	InlineVolumeSpecForCSIMigration bool
 }
 
 // Name returns the name of either Volume or PersistentVolume, one of which must not be nil.
+//要么是pod.spec.volumes[]名，要么是pv名
 func (spec *Spec) Name() string {
 	switch {
 	case spec.Volume != nil:
@@ -578,6 +581,7 @@ func NewSpecFromVolume(vs *v1.Volume) *Spec {
 }
 
 // NewSpecFromPersistentVolume creates an Spec from an v1.PersistentVolume
+// 通过corev1.PV创建卷在kubelet的内部表示
 func NewSpecFromPersistentVolume(pv *v1.PersistentVolume, readOnly bool) *Spec {
 	return &Spec{
 		PersistentVolume: pv,
@@ -660,6 +664,7 @@ func (pm *VolumePluginMgr) initProbedPlugin(probedPlugin VolumePlugin) error {
 // FindPluginBySpec looks for a plugin that can support a given volume
 // specification.  If no plugins can support or more than one plugin can
 // support it, return error.
+//1. 从卷插件管理器中找到卷的对应的插件
 func (pm *VolumePluginMgr) FindPluginBySpec(spec *Spec) (VolumePlugin, error) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -669,7 +674,9 @@ func (pm *VolumePluginMgr) FindPluginBySpec(spec *Spec) (VolumePlugin, error) {
 	}
 
 	matches := []VolumePlugin{}
+	// 从内置卷插件管理器中找到Volume SPec对应的插件。 可能有多个?
 	for _, v := range pm.plugins {
+		//csi: pv是否非空而且pv.Spe.CSI不为空
 		if v.CanSupport(spec) {
 			matches = append(matches, v)
 		}
@@ -890,10 +897,12 @@ func (pm *VolumePluginMgr) FindCreatablePluginBySpec(spec *Spec) (ProvisionableV
 // plugin is found.  All volumes require a mounter and unmounter, but not
 // every volume will have an attacher/detacher.
 func (pm *VolumePluginMgr) FindAttachablePluginBySpec(spec *Spec) (AttachableVolumePlugin, error) {
+	//1. 从卷插件管理器中找到卷的对应的插件
 	volumePlugin, err := pm.FindPluginBySpec(spec)
 	if err != nil {
 		return nil, err
 	}
+	//如果卷插件需要卷挂载到Pod内部时，先要附加到节点上，检测卷能不能
 	if attachableVolumePlugin, ok := volumePlugin.(AttachableVolumePlugin); ok {
 		if canAttach, err := attachableVolumePlugin.CanAttach(spec); err != nil {
 			return nil, err
@@ -1007,6 +1016,7 @@ func (pm *VolumePluginMgr) FindMapperPluginByName(name string) (BlockVolumePlugi
 }
 
 // FindNodeExpandablePluginBySpec fetches a persistent volume plugin by spec
+// 通过卷找到对应的插件，如果卷插件是支持扩容，则返回
 func (pm *VolumePluginMgr) FindNodeExpandablePluginBySpec(spec *Spec) (NodeExpandableVolumePlugin, error) {
 	volumePlugin, err := pm.FindPluginBySpec(spec)
 	if err != nil {

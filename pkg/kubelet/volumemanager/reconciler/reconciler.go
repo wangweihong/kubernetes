@@ -127,22 +127,23 @@ func NewReconciler(
 
 type reconciler struct {
 	kubeClient                    clientset.Interface
-	controllerAttachDetachEnabled bool
+	controllerAttachDetachEnabled bool // 是否启动控制器附加卷功能
 	loopSleepDuration             time.Duration
-	waitForAttachTimeout          time.Duration
-	nodeName                      types.NodeName
-	desiredStateOfWorld           cache.DesiredStateOfWorld
-	actualStateOfWorld            cache.ActualStateOfWorld
+	waitForAttachTimeout          time.Duration             //等待卷附加到节点超时时间
+	nodeName                      types.NodeName            //节点名
+	desiredStateOfWorld           cache.DesiredStateOfWorld //  卷期待附加挂载表
+	actualStateOfWorld            cache.ActualStateOfWorld  //   卷实际附加挂载表
 	populatorHasAddedPods         func() bool
-	operationExecutor             operationexecutor.OperationExecutor
+	operationExecutor             operationexecutor.OperationExecutor //调用具体的插件来执行操作
 	mounter                       mount.Interface
 	hostutil                      hostutil.HostUtils
 	volumePluginMgr               *volumepkg.VolumePluginMgr
-	kubeletPodsDir                string
+	kubeletPodsDir                string //pod在节点上的工作目录：/var/lib/kubelet/pods
 	timeOfLastSync                time.Time
 }
 
 func (rc *reconciler) Run(stopCh <-chan struct{}) {
+	//间隔100毫秒执行一次reconciliationLoopFunc()返回的函数
 	wait.Until(rc.reconciliationLoopFunc(), rc.loopSleepDuration, stopCh)
 }
 
@@ -179,6 +180,7 @@ func (rc *reconciler) reconcile() {
 
 func (rc *reconciler) unmountVolumes() {
 	// Ensure volumes that should be unmounted are unmounted.
+	//找到已经挂载到以及可能已经挂载到Pod内部的卷
 	for _, mountedVolume := range rc.actualStateOfWorld.GetAllMountedVolumes() {
 		if !rc.desiredStateOfWorld.PodExistsInVolume(mountedVolume.PodName, mountedVolume.VolumeName) {
 			// Volume is mounted, unmount it
@@ -373,8 +375,8 @@ type reconstructedVolume struct {
 	volumeGidValue      string
 	devicePath          string
 	mounter             volumepkg.Mounter
-	deviceMounter       volumepkg.DeviceMounter
-	blockVolumeMapper   volumepkg.BlockVolumeMapper
+	deviceMounter       volumepkg.DeviceMounter     //文件系统
+	blockVolumeMapper   volumepkg.BlockVolumeMapper //块设备
 }
 
 // syncStates scans the volume directories under the given pod directory.
@@ -615,6 +617,7 @@ func (rc *reconciler) updateDevicePath(volumesNeedUpdate map[v1.UniqueVolumeName
 // getDeviceMountPath returns device mount path for block volume which
 // implements BlockVolumeMapper or filesystem volume which implements
 // DeviceMounter
+// 如果卷是块设备, 挂载路径为/var/lib/kubelet/plugins/<pluginsName>/volumeDevices/<volID> ;如果卷是文件系统, 挂载路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，
 func getDeviceMountPath(volume *reconstructedVolume) (string, error) {
 	if volume.blockVolumeMapper != nil {
 		// for block volume, we return its global map path
@@ -658,6 +661,7 @@ func (rc *reconciler) updateStates(volumesNeedUpdate map[v1.UniqueVolumeName]*re
 		klog.V(4).Infof("Volume: %s (pod UID %s) is marked as mounted and added into the actual state", volume.volumeName, volume.podName)
 		// If the volume has device to mount, we mark its device as mounted.
 		if volume.deviceMounter != nil || volume.blockVolumeMapper != nil {
+			// 如果卷是块设备, 挂载路径为/var/lib/kubelet/plugins/<pluginsName>/volumeDevices/<volID> ;如果卷是文件系统, 挂载路径为/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount，
 			deviceMountPath, err := getDeviceMountPath(volume)
 			if err != nil {
 				klog.Errorf("Could not find device mount path for volume %s", volume.volumeName)

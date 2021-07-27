@@ -65,7 +65,7 @@ type DesiredStateOfWorld interface {
 	// to check this value before issuing the operation.
 	// If a volume in the reportedVolumes list does not exist in the list of
 	// volumes that should be attached to this node, it is skipped without error.
-	MarkVolumesReportedInUse(reportedVolumes []v1.UniqueVolumeName)
+	MarkVolumesReportedInUse(reportedVolumes []v1.UniqueVolumeName) //将reportedVolumes在期待附加挂载表的卷ReportedInUse设置为true
 
 	// DeletePodFromVolume removes the given pod from the given volume in the
 	// cache indicating the specified pod no longer requires the specified
@@ -142,12 +142,12 @@ type desiredStateOfWorld struct {
 	// attached to this node and mounted to the pods referencing it. The key in
 	// the map is the name of the volume and the value is a volume object
 	// containing more information about the volume.
-	volumesToMount map[v1.UniqueVolumeName]volumeToMount
+	volumesToMount map[v1.UniqueVolumeName]volumeToMount //期待附加到节点上并挂载到Pod内部的卷
 	// volumePluginMgr is the volume plugin manager used to create volume
 	// plugin objects.
 	volumePluginMgr *volume.VolumePluginMgr
 	// podErrors are errors caught by desiredStateOfWorldPopulator about volumes for a given pod.
-	podErrors map[types.UniquePodName]sets.String
+	podErrors map[types.UniquePodName]sets.String //挂载卷错误？
 
 	sync.RWMutex
 }
@@ -177,7 +177,7 @@ type volumeToMount struct {
 
 	// reportedInUse indicates that the volume was successfully added to the
 	// VolumesInUse field in the node's status.
-	reportedInUse bool
+	reportedInUse bool //
 
 	// desiredSizeLimit indicates the desired upper bound on the size of the volume
 	// (if so implemented)
@@ -291,6 +291,7 @@ func (dsw *desiredStateOfWorld) AddPodToVolume(
 	return volumeName, nil
 }
 
+//如果期待挂载表的卷存在reportedVolumes时, 则设置该卷.reportedInUse为true
 func (dsw *desiredStateOfWorld) MarkVolumesReportedInUse(
 	reportedVolumes []v1.UniqueVolumeName) {
 	dsw.Lock()
@@ -310,6 +311,7 @@ func (dsw *desiredStateOfWorld) MarkVolumesReportedInUse(
 	}
 }
 
+//从期待附加到节点的卷表中删除与指定PodName相关的挂载信息
 func (dsw *desiredStateOfWorld) DeletePodFromVolume(
 	podName types.UniquePodName, volumeName v1.UniqueVolumeName) {
 	dsw.Lock()
@@ -335,6 +337,7 @@ func (dsw *desiredStateOfWorld) DeletePodFromVolume(
 	}
 }
 
+//是否存在指定卷期待附加到节点并挂载到Pod内部
 func (dsw *desiredStateOfWorld) VolumeExists(
 	volumeName v1.UniqueVolumeName) bool {
 	dsw.RLock()
@@ -344,6 +347,7 @@ func (dsw *desiredStateOfWorld) VolumeExists(
 	return volumeExists
 }
 
+// 指定的卷是否在期待附加到节点的卷的表中，同时该卷是否期待挂载到指定的pod内部
 func (dsw *desiredStateOfWorld) PodExistsInVolume(
 	podName types.UniquePodName, volumeName v1.UniqueVolumeName) bool {
 	dsw.RLock()
@@ -353,11 +357,12 @@ func (dsw *desiredStateOfWorld) PodExistsInVolume(
 	if !volumeExists {
 		return false
 	}
-
+	//是否期待挂在卷到Pod内部
 	_, podExists := volumeObj.podsToMount[podName]
 	return podExists
 }
 
+//期待挂载卷的Pod是否存在指定的卷
 func (dsw *desiredStateOfWorld) VolumeExistsWithSpecName(podName types.UniquePodName, volumeSpecName string) bool {
 	dsw.RLock()
 	defer dsw.RUnlock()
@@ -371,6 +376,7 @@ func (dsw *desiredStateOfWorld) VolumeExistsWithSpecName(podName types.UniquePod
 	return false
 }
 
+//获取期待挂载卷的所有Pod
 func (dsw *desiredStateOfWorld) GetPods() map[types.UniquePodName]bool {
 	dsw.RLock()
 	defer dsw.RUnlock()
@@ -435,6 +441,7 @@ func (dsw *desiredStateOfWorld) isDeviceMountableVolume(volumeSpec *volume.Spec)
 	return false
 }
 
+//添加错误到指定的Pod
 func (dsw *desiredStateOfWorld) AddErrorToPod(podName types.UniquePodName, err string) {
 	dsw.Lock()
 	defer dsw.Unlock()
@@ -448,6 +455,7 @@ func (dsw *desiredStateOfWorld) AddErrorToPod(podName types.UniquePodName, err s
 	dsw.podErrors[podName] = sets.NewString(err)
 }
 
+//获取指定Pod的错误信息后从表中移除
 func (dsw *desiredStateOfWorld) PopPodErrors(podName types.UniquePodName) []string {
 	dsw.Lock()
 	defer dsw.Unlock()
@@ -459,6 +467,7 @@ func (dsw *desiredStateOfWorld) PopPodErrors(podName types.UniquePodName) []stri
 	return []string{}
 }
 
+//获取所有Pod挂载错误
 func (dsw *desiredStateOfWorld) GetPodsWithErrors() []types.UniquePodName {
 	dsw.RLock()
 	defer dsw.RUnlock()

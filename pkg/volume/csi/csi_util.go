@@ -110,6 +110,7 @@ func log(msg string, parts ...interface{}) string {
 }
 
 // getVolumePluginDir returns the path where CSI plugin keeps metadata for given volume
+//  /var/lib/kubelet/plugins/<pluginsName>/volumeDevices/<volID>
 func getVolumePluginDir(specVolID string, host volume.VolumeHost) string {
 	sanitizedSpecVolID := utilstrings.EscapeQualifiedName(specVolID)
 	return filepath.Join(host.GetVolumeDevicePluginDir(CSIPluginName), sanitizedSpecVolID)
@@ -163,6 +164,7 @@ func getSourceFromSpec(spec *volume.Spec) (*api.CSIVolumeSource, *api.CSIPersist
 }
 
 // getPVSourceFromSpec ensures only CSIPersistentVolumeSource is present in volume.Spec
+//CSI来自是pod.spec.volume或者pv.spec.CSI, 根据来源获取CSI卷信息
 func getPVSourceFromSpec(spec *volume.Spec) (*api.CSIPersistentVolumeSource, error) {
 	volSrc, pvSrc, err := getSourceFromSpec(spec)
 	if err != nil {

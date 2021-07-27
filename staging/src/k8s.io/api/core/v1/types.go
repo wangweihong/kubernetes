@@ -1657,7 +1657,7 @@ type CSIPersistentVolumeSource struct {
 	// VolumeHandle is the unique volume name returned by the CSI volume
 	// plugin’s CreateVolume to refer to the volume on all subsequent calls.
 	// Required.
-	VolumeHandle string `json:"volumeHandle" protobuf:"bytes,2,opt,name=volumeHandle"`
+	VolumeHandle string `json:"volumeHandle" protobuf:"bytes,2,opt,name=volumeHandle"` //调用CSIClient.CreateVolume后得到ID.具体怎么解析该值取决于CSI driver
 
 	// Optional: The value to pass to ControllerPublishVolumeRequest.
 	// Defaults to false (read/write).

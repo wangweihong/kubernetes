@@ -60,7 +60,7 @@ type DesiredStateOfWorldPopulator interface {
 	// to false, forcing it to be reprocessed. This is required to enable
 	// remounting volumes on pod updates (volumes like Downward API volumes
 	// depend on this behavior to ensure volume content is updated).
-	ReprocessPod(podName volumetypes.UniquePodName)
+	ReprocessPod(podName volumetypes.UniquePodName) //podName是Pod的UID
 
 	// HasAddedPods returns whether the populator has looped through the list
 	// of active pods and added them to the desired state of the world cache,
@@ -113,30 +113,32 @@ func NewDesiredStateOfWorldPopulator(
 
 type desiredStateOfWorldPopulator struct {
 	kubeClient                clientset.Interface
-	loopSleepDuration         time.Duration
+	loopSleepDuration         time.Duration // 轮询间隔，默认100毫秒
 	getPodStatusRetryDuration time.Duration
-	podManager                pod.Manager
+	podManager                pod.Manager //获取kubelet本地的Pod表
 	podStatusProvider         status.PodStatusProvider
-	desiredStateOfWorld       cache.DesiredStateOfWorld
-	actualStateOfWorld        cache.ActualStateOfWorld
-	pods                      processedPods
+	desiredStateOfWorld       cache.DesiredStateOfWorld //期待附加挂载卷表
+	actualStateOfWorld        cache.ActualStateOfWorld  //实际附加挂载卷表
+	pods                      processedPods             //记录已经处理过的Pod
 	kubeContainerRuntime      kubecontainer.Runtime
 	timeOfLastGetPodStatus    time.Time
 	keepTerminatedPodVolumes  bool
-	hasAddedPods              bool
+	hasAddedPods              bool // 一开始默认为false,执行一次processLoop设置为true, 然后再执行一次processLoop
 	hasAddedPodsLock          sync.RWMutex
 	csiMigratedPluginManager  csimigration.PluginManager
 	intreeToCSITranslator     csimigration.InTreeToCSITranslator
 }
 
 type processedPods struct {
-	processedPods map[volumetypes.UniquePodName]bool
+	processedPods map[volumetypes.UniquePodName]bool //key为Pod的UID, 用来表示该表中的Pod已经被处理过了
 	sync.RWMutex
 }
 
+//  执行两次wait for populatorLoop()
 func (dswp *desiredStateOfWorldPopulator) Run(sourcesReady config.SourcesReady, stopCh <-chan struct{}) {
 	// Wait for the completion of a loop that started after sources are all ready, then set hasAddedPods accordingly
 	klog.Infof("Desired state populator starts to run")
+	//间隔100毫秒进行轮询
 	wait.PollUntil(dswp.loopSleepDuration, func() (bool, error) {
 		done := sourcesReady.AllReady()
 		dswp.populatorLoop()
@@ -179,6 +181,10 @@ func (dswp *desiredStateOfWorldPopulator) populatorLoop() {
 	dswp.findAndRemoveDeletedPods()
 }
 
+//1.PodFailed
+//2.PodSucceeded
+//3. DELETEing
+//4. ContainerStatus[] ==Terminated || ContainerStatus[] == Waiting
 func (dswp *desiredStateOfWorldPopulator) isPodTerminated(pod *v1.Pod) bool {
 	podStatus, found := dswp.podStatusProvider.GetPodStatus(pod.UID)
 	if !found {
@@ -191,8 +197,11 @@ func (dswp *desiredStateOfWorldPopulator) isPodTerminated(pod *v1.Pod) bool {
 // exist but should
 func (dswp *desiredStateOfWorldPopulator) findAndAddNewPods() {
 	// Map unique pod name to outer volume name to MountedVolume.
+	// 将卷-->pods转换成pod-->volumes
 	mountedVolumesForPod := make(map[volumetypes.UniquePodName]map[string]cache.MountedVolume)
+	//是否支持对正在使用的PV进行扩容的特性, 1.15版本后默认是支持的
 	if utilfeature.DefaultFeatureGate.Enabled(features.ExpandInUsePersistentVolumes) {
+		//根据实际已挂载到Pod内部的卷的关系，记录pod和pod相关挂载卷表
 		for _, mountedVolume := range dswp.actualStateOfWorld.GetMountedVolumes() {
 			mountedVolumes, exist := mountedVolumesForPod[mountedVolume.PodName]
 			if !exist {
@@ -204,6 +213,7 @@ func (dswp *desiredStateOfWorldPopulator) findAndAddNewPods() {
 	}
 
 	processedVolumesForFSResize := sets.NewString()
+	//对kubelet中pod非1)Succeeded 2)Failed 3)Deleteing 4)ContainerStatus[]==Waiting|Terminated状态的Pod
 	for _, pod := range dswp.podManager.GetPods() {
 		if dswp.isPodTerminated(pod) {
 			// Do not (re)add volumes for terminated pods
@@ -297,18 +307,22 @@ func (dswp *desiredStateOfWorldPopulator) processPodVolumes(
 	if pod == nil {
 		return
 	}
-
+	// pod的UID
 	uniquePodName := util.GetUniquePodName(pod)
+	//如果Pod已经被处理了，不进行任何处理
 	if dswp.podPreviouslyProcessed(uniquePodName) {
 		return
 	}
 
 	allVolumesAdded := true
+	//从Pod.spec.containers中提取VolumeMounts(Filesystem)以及VolumeDevices(块设备)的名字
 	mounts, devices := util.GetPodVolumeNames(pod)
-
+	//如果开启了支持对已使用的PV进行的特性(默认是开启)
 	expandInUsePV := utilfeature.DefaultFeatureGate.Enabled(features.ExpandInUsePersistentVolumes)
 	// Process volume spec for each volume defined in pod
+	// pod.spec可以指定卷，但不去挂载到Pod内部
 	for _, podVolume := range pod.Spec.Volumes {
+		// 忽略没有要挂载Pod内部的卷
 		if !mounts.Has(podVolume.Name) && !devices.Has(podVolume.Name) {
 			// Volume is not used in the pod, ignore it.
 			klog.V(4).Infof("Skipping unused volume %q for pod %q", podVolume.Name, format.Pod(pod))
@@ -323,6 +337,7 @@ func (dswp *desiredStateOfWorldPopulator) processPodVolumes(
 				podVolume.Name,
 				format.Pod(pod),
 				err)
+			//记录
 			dswp.desiredStateOfWorld.AddErrorToPod(uniquePodName, err.Error())
 			allVolumesAdded = false
 			continue
@@ -442,6 +457,7 @@ func volumeRequiresFSResize(pvc *v1.PersistentVolumeClaim, pv *v1.PersistentVolu
 // podPreviouslyProcessed returns true if the volumes for this pod have already
 // been processed/reprocessed by the populator. Otherwise, the volumes for this pod need to
 // be reprocessed.
+//获取某个Pod是否已经处理过了
 func (dswp *desiredStateOfWorldPopulator) podPreviouslyProcessed(
 	podName volumetypes.UniquePodName) bool {
 	dswp.pods.RLock()
@@ -451,6 +467,7 @@ func (dswp *desiredStateOfWorldPopulator) podPreviouslyProcessed(
 }
 
 // markPodProcessingFailed marks the specified pod from processedPods as false to indicate that it failed processing
+// 标志Pod挂载失败？
 func (dswp *desiredStateOfWorldPopulator) markPodProcessingFailed(
 	podName volumetypes.UniquePodName) {
 	dswp.pods.Lock()
@@ -492,6 +509,7 @@ func (dswp *desiredStateOfWorldPopulator) deleteProcessedPod(
 // Returns an error if unable to obtain the volume at this time.
 func (dswp *desiredStateOfWorldPopulator) createVolumeSpec(
 	podVolume v1.Volume, podName string, podNamespace string, mounts, devices sets.String) (*v1.PersistentVolumeClaim, *volume.Spec, string, error) {
+	//如果pod使用PVC
 	if pvcSource :=
 		podVolume.VolumeSource.PersistentVolumeClaim; pvcSource != nil {
 		klog.V(5).Infof(
@@ -500,6 +518,7 @@ func (dswp *desiredStateOfWorldPopulator) createVolumeSpec(
 			pvcSource.ClaimName)
 
 		// If podVolume is a PVC, fetch the real PV behind the claim
+		// 通过pvcName找到已经绑定PV的PVC详情,1)没有绑定2)PV名为空3)PVC正在删除则报错
 		pvc, err := dswp.getPVCExtractPV(
 			podNamespace, pvcSource.ClaimName)
 		if err != nil {
@@ -509,6 +528,7 @@ func (dswp *desiredStateOfWorldPopulator) createVolumeSpec(
 				pvcSource.ClaimName,
 				err)
 		}
+		//获取PVC绑定的PV以及PVC UID
 		pvName, pvcUID := pvc.Spec.VolumeName, pvc.UID
 
 		klog.V(5).Infof(
@@ -596,6 +616,7 @@ func (dswp *desiredStateOfWorldPopulator) createVolumeSpec(
 // the API server, checks whether PVC is being deleted, extracts the name of the PV
 // it is pointing to and returns it.
 // An error is returned if the PVC object's phase is not "Bound".
+// 通过pvcName找到已经绑定PV的PVC详情,1)没有绑定2)PV名为空3)PVC正在删除则报错
 func (dswp *desiredStateOfWorldPopulator) getPVCExtractPV(
 	namespace string, claimName string) (*v1.PersistentVolumeClaim, error) {
 	pvc, err :=
@@ -631,6 +652,7 @@ func (dswp *desiredStateOfWorldPopulator) getPVCExtractPV(
 // getPVSpec fetches the PV object with the given name from the API server
 // and returns a volume.Spec representing it.
 // An error is returned if the call to fetch the PV object fails.
+//获取指定名而且和指定UID的PVC绑定的PV, 创建卷在kubelet的内部表示
 func (dswp *desiredStateOfWorldPopulator) getPVSpec(
 	name string,
 	pvcReadOnly bool,
@@ -640,13 +662,13 @@ func (dswp *desiredStateOfWorldPopulator) getPVSpec(
 		return nil, "", fmt.Errorf(
 			"failed to fetch PV %s from API server: %v", name, err)
 	}
-
+	// pv没有和pvc绑定
 	if pv.Spec.ClaimRef == nil {
 		return nil, "", fmt.Errorf(
 			"found PV object %s but it has a nil pv.Spec.ClaimRef indicating it is not yet bound to the claim",
 			name)
 	}
-
+	//和指定UID的PVC半丁
 	if pv.Spec.ClaimRef.UID != expectedClaimUID {
 		return nil, "", fmt.Errorf(
 			"found PV object %s but its pv.Spec.ClaimRef.UID %s does not point to claim.UID %s",

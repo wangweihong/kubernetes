@@ -41,6 +41,7 @@ import (
 	utilstrings "k8s.io/utils/strings"
 )
 
+// 这个模块负责将设备路径挂载到Pod在主机的路径： /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount
 //TODO (vladimirvivien) move this in a central loc later
 var (
 	//  将会在/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/vol_data.json 生成以下的内容
@@ -84,7 +85,7 @@ type csiMountMgr struct {
 // volume.Volume methods
 var _ volume.Volume = &csiMountMgr{}
 
-// /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  用来表示挂载在pod内部的卷
+// /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  挂载到Pod内部的主机路径
 func (c *csiMountMgr) GetPath() string {
 	dir := filepath.Join(getTargetPath(c.podUID, c.specVolumeID, c.plugin.host), "/mount")
 	klog.V(4).Info(log("mounter.GetPath generated [%s]", dir))
@@ -109,7 +110,9 @@ func (c *csiMountMgr) SetUp(mounterArgs volume.MounterArgs) error {
 	return c.SetUpAt(c.GetPath(), mounterArgs)
 }
 
-// dir:/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  用来表示挂载在pod内部的卷
+// dir:/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount  目的挂载路径
+// 根据pod.spec.volume或者pv.spec.csi获取csi的信息，从最终调用CSIClient.NodePublishVolume将设备路径挂载到pod在主机的路径<dir>
+// 如果卷来源是pv（不是pod.spec.volume),则设备路径为：/var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount
 func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error {
 	klog.V(4).Infof(log("Mounter.SetUpAt(%s)", dir))
 
@@ -135,12 +138,11 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	csi, err := c.csiClientGetter.Get()
 	if err != nil {
 		return volumetypes.NewTransientOperationFailure(log("mounter.SetUpAt failed to get CSI client: %v", err))
-
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), csiTimeout)
 	defer cancel()
 
-	//pvc中的csi或者pv.spec.csi获取csi的信息，二者只会获取一个
+	//pod.spec.volume或者pv.spec.csi获取csi的信息，二者只会获取一个
 	volSrc, pvSrc, err := getSourceFromSpec(c.spec)
 	if err != nil {
 		return errors.New(log("mounter.SetupAt failed to get CSI persistent source: %v", err))
@@ -152,17 +154,17 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	accessMode := api.ReadWriteOnce //默认单点读写?
 
 	var (
-		fsType             string //
+		fsType             string
 		volAttribs         map[string]string
 		nodePublishSecrets map[string]string
 		publishContext     map[string]string
 		mountOptions       []string
-		deviceMountPath    string
+		deviceMountPath    string // 如果是PV且CSIDriver支持NodeStage特性时才支持: /var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount. 其余都是空?
 		secretRef          *api.SecretReference
 	)
 
 	switch {
-	//从pvc中提取CSI信息
+	//从pod.spec.volume中提取CSI信息
 	case volSrc != nil:
 		if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
 			return fmt.Errorf("CSIInlineVolume feature required")
@@ -254,10 +256,12 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 	}
 
 	// Inject pod information into volume_attributes
+	// 返回一个记录mounter相关Pod的表（ CSI驱动必须有同名的CSIDriver对象）
 	podAttrs, err := c.podAttributes()
 	if err != nil {
 		return volumetypes.NewTransientOperationFailure(log("mounter.SetUpAt failed to assemble volume attributes: %v", err))
 	}
+	// 将pod的信息加到卷属性中
 	if podAttrs != nil {
 		if volAttribs == nil {
 			volAttribs = podAttrs
@@ -267,13 +271,13 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 			}
 		}
 	}
-
+	//通过CSI Client调用CSI Driver.NodePublishVolume.
 	err = csi.NodePublishVolume(
 		ctx,
 		volumeHandle,
 		readOnly,
-		deviceMountPath,
-		dir,
+		deviceMountPath, // 如果是PV且CSIDriver支持NodeStage特性时才会设置为: /var/lib/kubelet/plugins/kubernetes.io/pv/<PV>/globalmount
+		dir,             // /var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount
 		accessMode,
 		publishContext,
 		volAttribs,
@@ -368,6 +372,9 @@ var _ volume.Unmounter = &csiMountMgr{}
 func (c *csiMountMgr) TearDown() error {
 	return c.TearDownAt(c.GetPath())
 }
+
+// 调用CSIClient.NodeUnpublishVolume()卸载卷，/var/lib/kubelet/pods/<podID>/volumes/kubernetes.io~csi/<volumeName>/mount
+// 然后删除挂载目录内文件
 func (c *csiMountMgr) TearDownAt(dir string) error {
 	klog.V(4).Infof(log("Unmounter.TearDown(%s)", dir))
 

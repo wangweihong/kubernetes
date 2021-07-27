@@ -500,12 +500,13 @@ func (volume *AttachedVolume) GenerateError(prefixMsg string, err error) (simple
 }
 
 // MountedVolume represents a volume that has successfully been mounted to a pod.
+//用来描述一个挂载到Pod的卷。其由AttachedMount以及AttachedMount.MountedPod[]的信息组成。
 type MountedVolume struct {
 	// PodName is the unique identifier of the pod mounted to.
-	PodName volumetypes.UniquePodName
+	PodName volumetypes.UniquePodName //卷要挂载到哪个Pod内部
 
 	// VolumeName is the unique identifier of the volume mounted to the pod.
-	VolumeName v1.UniqueVolumeName
+	VolumeName v1.UniqueVolumeName //
 
 	// InnerVolumeSpecName is the volume.Spec.Name() of the volume. If the
 	// volume was referenced through a persistent volume claims, this contains
@@ -543,7 +544,8 @@ type MountedVolume struct {
 	//     	 gcePersistentDisk:
 	//     	   pdName: my-data-disk
 	//     	   fsType: ext4
-	InnerVolumeSpecName string
+	InnerVolumeSpecName string //如果是PVC,则是pvc名，否则是 pod.spec.volumes.name
+	//这个名字用于pod内部挂在路径：// /var/lib/kubelet/pods/{podUID}/volumes/{escapeQualifiedPluginName}/{innerVolumeSpecName}/
 
 	// outerVolumeSpecName is the podSpec.Volume[x].Name of the volume. If the
 	// volume was referenced through a persistent volume claim, this contains
@@ -581,14 +583,14 @@ type MountedVolume struct {
 	//     	 gcePersistentDisk:
 	//     	   pdName: my-data-disk
 	//     	   fsType: ext4
-	OuterVolumeSpecName string
+	OuterVolumeSpecName string //pod.spec.volumes.name
 
 	// PluginName is the "Unescaped Qualified" name of the volume plugin used to
 	// mount and unmount this volume. It can be used to fetch the volume plugin
 	// to unmount with, on demand. It is also the name that plugins use, though
 	// escaped, in their pod mount path, i.e.
 	// /var/lib/kubelet/pods/{podUID}/volumes/{escapeQualifiedPluginName}/{outerVolumeSpecName}/
-	PluginName string
+	PluginName string //插件名
 
 	// PodUID is the UID of the pod mounted to. It is also the string used by
 	// plugins in their pod mount path, i.e.
@@ -598,7 +600,7 @@ type MountedVolume struct {
 	// Mounter is the volume mounter used to mount this volume. It is required
 	// by kubelet to create container.VolumeMap.
 	// Mounter is only required for file system volumes and not required for block volumes.
-	Mounter volume.Mounter
+	Mounter volume.Mounter //用来挂载卷的挂载器，具体取决于卷的类型
 
 	// BlockVolumeMapper is the volume mapper used to map this volume. It is required
 	// by kubelet to create container.VolumeMap.
@@ -614,7 +616,7 @@ type MountedVolume struct {
 
 	// DeviceMountPath contains the path on the node where the device should
 	// be mounted after it is attached.
-	DeviceMountPath string
+	DeviceMountPath string //卷附加到节点上的路径
 }
 
 // GenerateMsgDetailed returns detailed msgs for mounted volumes
@@ -840,6 +842,7 @@ func (oe *operationExecutor) UnmountVolume(
 	volumeToUnmount MountedVolume,
 	actualStateOfWorld ActualStateOfWorldMounterUpdater,
 	podsDir string) error {
+	// 检测卷模式是不是文件系统
 	fsVolume, err := util.CheckVolumeModeFilesystem(volumeToUnmount.VolumeSpec)
 	if err != nil {
 		return err

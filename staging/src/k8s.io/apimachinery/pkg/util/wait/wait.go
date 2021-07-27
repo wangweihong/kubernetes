@@ -468,7 +468,8 @@ func pollInternal(wait WaitFunc, condition ConditionFunc) error {
 // window is too short.
 //
 // If you want to immediately Poll something forever, see PollImmediateInfinite.
-// 先立即执行condition,如果成功或者执行失败则返回。否则每隔interval触发condition的执行，直到condition结果为true或者condition执行失败或者超时
+// 先立即执行condition,如果结果达到预期(true)或者执行失败则返回。否则每隔interval触发condition的执行，直到condition结果为true或者condition执行失败或者超时
+// 先检测执行错误，再检测执行结果
 func PollImmediate(interval, timeout time.Duration, condition ConditionFunc) error {
 	return pollImmediateInternal(poller(interval, timeout), condition)
 }

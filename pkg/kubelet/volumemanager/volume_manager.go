@@ -56,7 +56,7 @@ import (
 const (
 	// reconcilerLoopSleepPeriod is the amount of time the reconciler loop waits
 	// between successive executions
-	reconcilerLoopSleepPeriod = 100 * time.Millisecond
+	reconcilerLoopSleepPeriod = 100 * time.Millisecond //调和间隔 100毫秒
 
 	// desiredStateOfWorldPopulatorLoopSleepPeriod is the amount of time the
 	// DesiredStateOfWorldPopulator loop waits between successive executions
@@ -77,11 +77,11 @@ const (
 	// request to the pod).
 	// Value is slightly offset from 2 minutes to make timeouts due to this
 	// constant recognizable.
-	podAttachAndMountTimeout = 2*time.Minute + 3*time.Second
+	podAttachAndMountTimeout = 2*time.Minute + 3*time.Second //轮询Pod所有期待的卷挂载到Pod内部的超时时间
 
 	// podAttachAndMountRetryInterval is the amount of time the GetVolumesForPod
 	// call waits before retrying
-	podAttachAndMountRetryInterval = 300 * time.Millisecond
+	podAttachAndMountRetryInterval = 300 * time.Millisecond // 轮询Pod所有期待的卷挂载到Pod内部的间隔时间
 
 	// waitForAttachTimeout is the maximum amount of time a
 	// operationexecutor.Mount call will wait for a volume to be attached.
@@ -104,19 +104,19 @@ type VolumeManager interface {
 	// actual state of the world).
 	// An error is returned if all volumes are not attached and mounted within
 	// the duration defined in podAttachAndMountTimeout.
-	WaitForAttachAndMount(pod *v1.Pod) error
+	WaitForAttachAndMount(pod *v1.Pod) error // 间隔300毫秒轮询直到Pod中所有期待的卷都挂载到Pod内部，或者超时（2分3秒）
 
 	// GetMountedVolumesForPod returns a VolumeMap containing the volumes
 	// referenced by the specified pod that are successfully attached and
 	// mounted. The key in the map is the OuterVolumeSpecName (i.e.
 	// pod.Spec.Volumes[x].Name). It returns an empty VolumeMap if pod has no
 	// volumes.
-	GetMountedVolumesForPod(podName types.UniquePodName) container.VolumeMap
+	GetMountedVolumesForPod(podName types.UniquePodName) container.VolumeMap //获取已经挂载到Pod内部的卷表
 
 	// GetExtraSupplementalGroupsForPod returns a list of the extra
 	// supplemental groups for the Pod. These extra supplemental groups come
 	// from annotations on persistent volumes that the pod depends on.
-	GetExtraSupplementalGroupsForPod(pod *v1.Pod) []int64
+	GetExtraSupplementalGroupsForPod(pod *v1.Pod) []int64 //Pod的额外补充组
 
 	// GetVolumesInUse returns a list of all volumes that implement the volume.Attacher
 	// interface and are currently in use according to the actual and desired
@@ -256,17 +256,18 @@ type volumeManager struct {
 	intreeToCSITranslator csimigration.InTreeToCSITranslator
 }
 
+//1. 启动一个协程处理
 func (vm *volumeManager) Run(sourcesReady config.SourcesReady, stopCh <-chan struct{}) {
 	defer runtime.HandleCrash()
-
+	//异步运行期待挂载卷填充器
 	go vm.desiredStateOfWorldPopulator.Run(sourcesReady, stopCh)
 	klog.V(2).Infof("The desired_state_of_world populator starts")
-
+	//异步运行调和器
 	klog.Infof("Starting Kubelet Volume Manager")
 	go vm.reconciler.Run(stopCh)
 
 	metrics.Register(vm.actualStateOfWorld, vm.desiredStateOfWorld, vm.volumePluginMgr)
-
+	//启动
 	if vm.kubeClient != nil {
 		// start informer for CSIDriver
 		vm.volumePluginMgr.Run(stopCh)
@@ -276,9 +277,12 @@ func (vm *volumeManager) Run(sourcesReady config.SourcesReady, stopCh <-chan str
 	klog.Infof("Shutting down Kubelet Volume Manager")
 }
 
+//获取已经挂载到Pod内部的卷表
 func (vm *volumeManager) GetMountedVolumesForPod(podName types.UniquePodName) container.VolumeMap {
 	podVolumes := make(container.VolumeMap)
+	//获取实际已附属到节点上的卷中哪些卷已经挂载到Pod内部
 	for _, mountedVolume := range vm.actualStateOfWorld.GetMountedVolumesForPod(podName) {
+		//key为对外名字，即pod.spec.volume中的名字， 而不是pod.spec.container.volumeMount中的名字
 		podVolumes[mountedVolume.OuterVolumeSpecName] = container.VolumeInfo{
 			Mounter:             mountedVolume.Mounter,
 			BlockVolumeMapper:   mountedVolume.BlockVolumeMapper,
@@ -358,41 +362,49 @@ func (vm *volumeManager) MarkVolumesAsReportedInUse(
 	vm.desiredStateOfWorld.MarkVolumesReportedInUse(volumesReportedAsInUse)
 }
 
+// 轮询直到Pod中所有期待的卷都挂载到Pod内部，或者超时
 func (vm *volumeManager) WaitForAttachAndMount(pod *v1.Pod) error {
 	if pod == nil {
 		return nil
 	}
-
+	// 从Pod.spec.containers中提取VolumeMounts以及VolumeDevices(块设备)的名字
+	// Pod期待挂载的卷
 	expectedVolumes := getExpectedVolumes(pod)
+	//Pod没有想要挂载的卷
 	if len(expectedVolumes) == 0 {
 		// No volumes to verify
 		return nil
 	}
 
 	klog.V(3).Infof("Waiting for volumes to attach and mount for pod %q", format.Pod(pod))
-	uniquePodName := util.GetUniquePodName(pod)
+	uniquePodName := util.GetUniquePodName(pod) //Pod的UID
 
 	// Some pods expect to have Setup called over and over again to update.
 	// Remount plugins for which this is true. (Atomically updating volumes,
 	// like Downward API, depend on this to update the contents of the volume).
-	vm.desiredStateOfWorldPopulator.ReprocessPod(uniquePodName)
+	vm.desiredStateOfWorldPopulator.ReprocessPod(uniquePodName) //标志Pod挂载失败
 
+	//300毫秒轮询，检测pod中所有期待的卷是否全部正确挂载到Pod内部。最多轮询2分3秒
 	err := wait.PollImmediate(
-		podAttachAndMountRetryInterval,
-		podAttachAndMountTimeout,
-		vm.verifyVolumesMountedFunc(uniquePodName, expectedVolumes))
-
+		podAttachAndMountRetryInterval,                              //300毫秒
+		podAttachAndMountTimeout,                                    //超时2分3秒
+		vm.verifyVolumesMountedFunc(uniquePodName, expectedVolumes)) //1.pod的卷挂载是否有出错，2. pod所有卷是否都已经挂载
+	//	1. 超时仍有卷没有挂载完成 2.有卷挂载出现错误
 	if err != nil {
+		// 找到pod中期待挂载的文件系统/块设备卷中有哪些还没有挂载到Pod内部
 		unmountedVolumes :=
 			vm.getUnmountedVolumes(uniquePodName, expectedVolumes)
 		// Also get unattached volumes for error message
+		// 找到pod中期待挂载的文件系统/块设备卷中有哪些卷还没有附属到节点上
 		unattachedVolumes :=
 			vm.getUnattachedVolumes(expectedVolumes)
-
+		// 所有pod期待挂载的卷都已经挂载
+		// 处理到这里，挂载又完成了?
 		if len(unmountedVolumes) == 0 {
 			return nil
 		}
-
+		//umounted volume: 卷已经附属到节点上，但还没有挂载到Pod内部
+		//unattached volume: 卷还没有附属到节点上
 		return fmt.Errorf(
 			"unmounted volumes=%v, unattached volumes=%v: %s",
 			unmountedVolumes,
@@ -406,6 +418,7 @@ func (vm *volumeManager) WaitForAttachAndMount(pod *v1.Pod) error {
 
 // getUnattachedVolumes returns a list of the volumes that are expected to be attached but
 // are not currently attached to the node
+// 找到expectedVolume中有哪些卷还没有附属到节点上
 func (vm *volumeManager) getUnattachedVolumes(expectedVolumes []string) []string {
 	unattachedVolumes := []string{}
 	for _, volume := range expectedVolumes {
@@ -418,11 +431,14 @@ func (vm *volumeManager) getUnattachedVolumes(expectedVolumes []string) []string
 
 // verifyVolumesMountedFunc returns a method that returns true when all expected
 // volumes are mounted.
+//1.pod的卷挂载是否有出错，2.expectedVolume是否都已经全部挂载到Pod内部
 func (vm *volumeManager) verifyVolumesMountedFunc(podName types.UniquePodName, expectedVolumes []string) wait.ConditionFunc {
 	return func() (done bool, err error) {
+		//存在错误
 		if errs := vm.desiredStateOfWorld.PopPodErrors(podName); len(errs) > 0 {
 			return true, errors.New(strings.Join(errs, "; "))
 		}
+		//expectedVolume是否都已经全部挂载
 		return len(vm.getUnmountedVolumes(podName, expectedVolumes)) == 0, nil
 	}
 }
@@ -431,16 +447,19 @@ func (vm *volumeManager) verifyVolumesMountedFunc(podName types.UniquePodName, e
 // the actual state of the world, and uses it to process the list of
 // expectedVolumes. It returns a list of unmounted volumes.
 // The list also includes volume that may be mounted in uncertain state.
+// 从实际已挂载到pod内部的卷，从中找到哪些expectedVolumes没有挂载
 func (vm *volumeManager) getUnmountedVolumes(podName types.UniquePodName, expectedVolumes []string) []string {
 	mountedVolumes := sets.NewString()
 	for _, mountedVolume := range vm.actualStateOfWorld.GetMountedVolumesForPod(podName) {
 		mountedVolumes.Insert(mountedVolume.OuterVolumeSpecName)
 	}
+	//对比实际已挂载卷(mountedVolume)以及期待挂载卷(expectedVolumes),找到哪些期待挂载卷还没有挂载
 	return filterUnmountedVolumes(mountedVolumes, expectedVolumes)
 }
 
 // filterUnmountedVolumes adds each element of expectedVolumes that is not in
 // mountedVolumes to a list of unmountedVolumes and returns it.
+//对比实际已挂载卷(mountedVolume)以及期待挂载卷(expectedVolumes),找到哪些期待挂载卷还没有挂载
 func filterUnmountedVolumes(mountedVolumes sets.String, expectedVolumes []string) []string {
 	unmountedVolumes := []string{}
 	for _, expectedVolume := range expectedVolumes {
@@ -453,6 +472,7 @@ func filterUnmountedVolumes(mountedVolumes sets.String, expectedVolumes []string
 
 // getExpectedVolumes returns a list of volumes that must be mounted in order to
 // consider the volume setup step for this pod satisfied.
+// 从Pod.spec.containers中提取VolumeMounts以及VolumeDevices(块设备)的名字
 func getExpectedVolumes(pod *v1.Pod) []string {
 	mounts, devices := util.GetPodVolumeNames(pod)
 	return mounts.Union(devices).UnsortedList()

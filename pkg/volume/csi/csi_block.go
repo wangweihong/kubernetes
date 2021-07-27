@@ -102,6 +102,7 @@ var _ volume.CustomBlockVolumeMapper = &csiBlockMapper{}
 
 // GetGlobalMapPath returns a global map path (on the node) to a device file which will be symlinked to
 // Example: plugins/kubernetes.io/csi/volumeDevices/{specName}/dev
+// /var/lib/kubelet/plugins/<pluginsName>/volumeDevices/<volID>
 func (m *csiBlockMapper) GetGlobalMapPath(spec *volume.Spec) (string, error) {
 	dir := getVolumeDevicePluginDir(m.specName, m.plugin.host)
 	klog.V(4).Infof(log("blockMapper.GetGlobalMapPath = %s", dir))

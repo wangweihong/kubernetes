@@ -97,6 +97,7 @@ const (
 	// owner: @mlmhl
 	// beta: v1.15
 	// Ability to expand persistent volumes' file system without unmounting volumes.
+	// 1.15默认是启动的
 	ExpandInUsePersistentVolumes featuregate.Feature = "ExpandInUsePersistentVolumes"
 
 	// owner: @gnufied

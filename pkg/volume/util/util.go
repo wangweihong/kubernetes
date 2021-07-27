@@ -323,6 +323,7 @@ func GetWindowsPath(path string) string {
 }
 
 // GetUniquePodName returns a unique identifier to reference a pod by
+// Pod的UID
 func GetUniquePodName(pod *v1.Pod) types.UniquePodName {
 	return types.UniquePodName(pod.UID)
 }
@@ -375,6 +376,10 @@ func GetUniqueVolumeNameFromSpec(
 }
 
 // IsPodTerminated checks if pod is terminated
+//1.PodFailed
+//2.PodSucceeded
+//3. DELETEing
+//4. ContainerStatus[] ==Terminated || ContainerStatus[] == Waiting
 func IsPodTerminated(pod *v1.Pod, podStatus v1.PodStatus) bool {
 	return podStatus.Phase == v1.PodFailed || podStatus.Phase == v1.PodSucceeded || (pod.DeletionTimestamp != nil && notRunning(podStatus.ContainerStatuses))
 }
@@ -416,6 +421,7 @@ func NewSafeFormatAndMountFromHost(pluginName string, host volume.VolumeHost) *m
 // GetVolumeMode retrieves VolumeMode from pv.
 // If the volume doesn't have PersistentVolume, it's an inline volume,
 // should return volumeMode as filesystem to keep existing behavior.
+// 默认卷模式是文件系统，如果卷来自PV,则从PersistentVolume.Spec.VolumeMode来获取
 func GetVolumeMode(volumeSpec *volume.Spec) (v1.PersistentVolumeMode, error) {
 	if volumeSpec == nil || volumeSpec.PersistentVolume == nil {
 		return v1.PersistentVolumeFilesystem, nil
@@ -433,7 +439,9 @@ func GetPersistentVolumeClaimQualifiedName(claim *v1.PersistentVolumeClaim) stri
 
 // CheckVolumeModeFilesystem checks VolumeMode.
 // If the mode is Filesystem, return true otherwise return false.
+// 检测卷模式是不是文件系统
 func CheckVolumeModeFilesystem(volumeSpec *volume.Spec) (bool, error) {
+	// 默认卷模式是文件系统，如果卷来自PV,则从PersistentVolume.Spec.VolumeMode来获取
 	volumeMode, err := GetVolumeMode(volumeSpec)
 	if err != nil {
 		return true, err
@@ -588,6 +596,7 @@ func IsLocalEphemeralVolume(volume v1.Volume) bool {
 
 // GetPodVolumeNames returns names of volumes that are used in a pod,
 // either as filesystem mount or raw block device.
+//从Pod.spec.containers中提取VolumeMounts（Filesystem）以及VolumeDevices(块设备)的名字
 func GetPodVolumeNames(pod *v1.Pod) (mounts sets.String, devices sets.String) {
 	mounts = sets.NewString()
 	devices = sets.NewString()
