@@ -115,8 +115,8 @@ type desiredStateOfWorldPopulator struct {
 	kubeClient                clientset.Interface
 	loopSleepDuration         time.Duration // 轮询间隔，默认100毫秒
 	getPodStatusRetryDuration time.Duration
-	podManager                pod.Manager //获取kubelet本地的Pod表
-	podStatusProvider         status.PodStatusProvider
+	podManager                pod.Manager               //获取kubelet本地Pod的相关表
+	podStatusProvider         status.PodStatusProvider  //pod当前的状态
 	desiredStateOfWorld       cache.DesiredStateOfWorld //期待附加挂载卷表
 	actualStateOfWorld        cache.ActualStateOfWorld  //实际附加挂载卷表
 	pods                      processedPods             //记录已经处理过的Pod

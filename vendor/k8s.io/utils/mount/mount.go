@@ -36,6 +36,7 @@ const (
 )
 
 // Interface defines the set of methods to allow for mount operations on a system.
+// 如果是 linux,这里是调用mount接口来进行挂载/卸载等操作
 type Interface interface {
 	// Mount mounts source to target as fstype with given options.
 	// options MUST not contain sensitive material (like passwords).

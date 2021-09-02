@@ -837,19 +837,19 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	// setup volumeManager
 	klet.volumeManager = volumemanager.NewVolumeManager(
-		kubeCfg.EnableControllerAttachDetach,
+		kubeCfg.EnableControllerAttachDetach, //当设置后，kubelet不再进行卷的挂载/卸载。而由（Master)volume attach/detach controller来执行挂载/卸载?
 		nodeName,
-		klet.podManager,
-		klet.statusManager,
+		klet.podManager,    // 用来获取kubelet本地的Pod
+		klet.statusManager, // 用来和apiserver同步Pod的Status
 		klet.kubeClient,
 		klet.volumePluginMgr,
-		klet.containerRuntime,
-		kubeDeps.Mounter,
-		kubeDeps.HostUtil,
-		klet.getPodsDir(), ///var/lib/kubelet/pods
+		klet.containerRuntime, // 用来和容器运行打交道
+		kubeDeps.Mounter,      // linux:利用mount工具在节点上执行挂载/卸载挂载
+		kubeDeps.HostUtil,     // 和主机交互的工具
+		klet.getPodsDir(),     // /var/lib/kubelet/pods
 		kubeDeps.Recorder,
 		experimentalCheckNodeCapabilitiesBeforeMount,
-		keepTerminatedPodVolumes,
+		keepTerminatedPodVolumes, // 调试使用
 		volumepathhandler.NewBlockVolumePathHandler())
 
 	klet.reasonCache = NewReasonCache()
@@ -1029,7 +1029,7 @@ type Kubelet struct {
 	serverCertificateManager certificate.Manager
 
 	// Syncs pods statuses with apiserver; also used as a cache of statuses.
-	statusManager status.Manager
+	statusManager status.Manager //和Apiserver进行Pod状态同步
 
 	// VolumeManager runs a set of asynchronous loops that figure out which
 	// volumes need to be attached/mounted/unmounted/detached based on the pods
@@ -1053,7 +1053,7 @@ type Kubelet struct {
 	redirectContainerStreaming bool
 
 	// Container runtime.
-	containerRuntime kubecontainer.Runtime
+	containerRuntime kubecontainer.Runtime //管理容器运行时
 
 	// Streaming runtime handles container streaming.
 	streamingRuntime kubecontainer.StreamingRuntime

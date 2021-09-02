@@ -76,7 +76,7 @@ type Type struct {
 	// These things may be simultaneously in the dirty set. When we finish
 	// processing something and remove it from this set, we'll check if
 	// it's in the dirty set, and if so, add it to the queue.
-	processing set //当有对象被从queue提取出来交由工作进程成立时，就会加入到该表中。表明该对象正在被工作进程处理
+	processing set //当有对象被从queue提取出来交由工作进程处理时，就会加入到该表中。表明该对象正在被工作进程处理
 
 	cond *sync.Cond //条件变量。可以广播所有等待者
 
