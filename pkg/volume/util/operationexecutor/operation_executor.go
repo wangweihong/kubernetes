@@ -73,6 +73,7 @@ type OperationExecutor interface {
 
 	// VerifyVolumesAreAttached verifies volumes being used in entire cluster and if they are still attached to the node
 	// If any volume is not attached right now, it will update actual state of world to reflect that.
+	//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点
 	VerifyVolumesAreAttached(volumesToVerify map[types.NodeName][]AttachedVolume, actualStateOfWorld ActualStateOfWorldAttacherUpdater)
 
 	// DetachVolume detaches the volume from the node specified in
@@ -175,6 +176,7 @@ type MarkVolumeOpts struct {
 
 // ActualStateOfWorldMounterUpdater defines a set of operations updating the actual
 // state of the world cache after successful mount/unmount.
+// 更新actualStateOfWorld表卷和pod的挂载关系
 type ActualStateOfWorldMounterUpdater interface {
 	// Marks the specified volume as mounted to the specified pod
 	MarkVolumeAsMounted(markVolumeOpts MarkVolumeOpts) error
@@ -206,6 +208,7 @@ type ActualStateOfWorldMounterUpdater interface {
 
 // ActualStateOfWorldAttacherUpdater defines a set of operations updating the
 // actual state of the world cache after successful attach/detach/mount/unmount.
+// 更新actualStateOfWorld表卷和node的Attach关系
 type ActualStateOfWorldAttacherUpdater interface {
 	// Marks the specified volume as attached to the specified node.  If the
 	// volume name is supplied, that volume name will be used.  If not, the
@@ -214,15 +217,18 @@ type ActualStateOfWorldAttacherUpdater interface {
 	// TODO: in the future, we should be able to remove the volumeName
 	// argument to this method -- since it is used only for attachable
 	// volumes.  See issue 29695.
+	//已经确定
 	MarkVolumeAsAttached(volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, nodeName types.NodeName, devicePath string) error
 
 	// Marks the specified volume as *possibly* attached to the specified node.
 	// If an attach operation fails, the attach/detach controller does not know for certain if the volume is attached or not.
 	// If the volume name is supplied, that volume name will be used.  If not, the
 	// volume name is computed using the result from querying the plugin.
+	// 添加卷到已Attached表，并记录与节点的Attached关系。但不确认是否真的的Attached到节点
 	MarkVolumeAsUncertain(volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, nodeName types.NodeName) error
 
 	// Marks the specified volume as detached from the specified node
+	//将卷和节点的Attached关系从表中清除。如果卷不再有Attached的节点，也移除卷。
 	MarkVolumeAsDetached(volumeName v1.UniqueVolumeName, nodeName types.NodeName)
 
 	// Marks desire to detach the specified volume (remove the volume from the node's
@@ -279,11 +285,11 @@ func generateVolumeMsg(prefixMsg, suffixMsg, volumeName, details string) (simple
 type VolumeToAttach struct {
 	// MultiAttachErrorReported indicates whether the multi-attach error has been reported for the given volume.
 	// It is used to prevent reporting the error from being reported more than once for a given volume.
-	MultiAttachErrorReported bool
+	MultiAttachErrorReported bool //如果卷不支持Attach到多个节点，则设置为True
 
 	// VolumeName is the unique identifier for the volume that should be
 	// attached.
-	VolumeName v1.UniqueVolumeName
+	VolumeName v1.UniqueVolumeName //取决于具体的插件/驱动/卷名构建的卷唯一识别符。如csiPlugin: kubernetes.io/csi/<csiDriverName>^volumeName, csiDriver为注册的驱动
 
 	// VolumeSpec is a volume spec containing the specification for the volume
 	// that should be attached.
@@ -333,6 +339,7 @@ func (volume *VolumeToAttach) GenerateError(prefixMsg string, err error) (simple
 
 // VolumeToMount represents a volume that should be attached to this node and
 // mounted to the PodName.
+//描述卷和Attached节点，以及挂载的Pod的关系
 type VolumeToMount struct {
 	// VolumeName is the unique identifier for the volume that should be
 	// mounted.
@@ -449,11 +456,11 @@ type AttachedVolume struct {
 	VolumeSpec *volume.Spec
 
 	// NodeName is the identifier for the node that the volume is attached to.
-	NodeName types.NodeName
+	NodeName types.NodeName //卷Attached的节点
 
 	// PluginIsAttachable indicates that the plugin for this volume implements
 	// the volume.Attacher interface
-	PluginIsAttachable bool
+	PluginIsAttachable bool //插件是否支持Attach
 
 	// DevicePath contains the path on the node where the volume is attached.
 	// For non-attachable volumes this is empty.
@@ -465,7 +472,7 @@ type AttachedVolume struct {
 
 	// PluginName is the Unescaped Qualified name of the volume plugin used to
 	// attach and mount this volume.
-	PluginName string
+	PluginName string //卷对应的插件
 }
 
 // GenerateMsgDetailed returns detailed msgs for attached volumes
@@ -544,7 +551,7 @@ type MountedVolume struct {
 	//     	 gcePersistentDisk:
 	//     	   pdName: my-data-disk
 	//     	   fsType: ext4
-	InnerVolumeSpecName string //如果是PVC,则是pvc名，否则是 pod.spec.volumes.name
+	InnerVolumeSpecName string //如果是PVC,则是pv名，否则是 pod.spec.volumes.name
 	//这个名字用于pod内部挂在路径：// /var/lib/kubelet/pods/{podUID}/volumes/{escapeQualifiedPluginName}/{innerVolumeSpecName}/
 
 	// outerVolumeSpecName is the podSpec.Volume[x].Name of the volume. If the
@@ -693,6 +700,7 @@ func (oe *operationExecutor) DetachVolume(
 
 }
 
+//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点
 func (oe *operationExecutor) VerifyVolumesAreAttached(
 	attachedVolumes map[types.NodeName][]AttachedVolume,
 	actualStateOfWorld ActualStateOfWorldAttacherUpdater) {
@@ -702,12 +710,13 @@ func (oe *operationExecutor) VerifyVolumesAreAttached(
 	volumeSpecMapByPlugin := make(map[string]map[*volume.Spec]v1.UniqueVolumeName)
 
 	for node, nodeAttachedVolumes := range attachedVolumes {
+		//遍历节点上所有Attached的卷
 		for _, volumeAttached := range nodeAttachedVolumes {
 			if volumeAttached.VolumeSpec == nil {
 				klog.Errorf("VerifyVolumesAreAttached: nil spec for volume %s", volumeAttached.VolumeName)
 				continue
 			}
-
+			// 卷对应的插件
 			volumePlugin, err :=
 				oe.operationGenerator.GetVolumePluginMgr().FindPluginBySpec(volumeAttached.VolumeSpec)
 			if err != nil {
@@ -730,7 +739,7 @@ func (oe *operationExecutor) VerifyVolumesAreAttached(
 			}
 
 			pluginName := volumePlugin.GetPluginName()
-
+			// 插件是否支持大容量校验?  CSI不支持
 			if volumePlugin.SupportsBulkVolumeVerification() {
 				pluginNodes, pluginNodesExist := bulkVerifyPluginsByNode[pluginName]
 
@@ -757,13 +766,14 @@ func (oe *operationExecutor) VerifyVolumesAreAttached(
 			}
 
 			// If node doesn't support Bulk volume polling it is best to poll individually
+			//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点
 			nodeError := oe.VerifyVolumesAreAttachedPerNode(nodeAttachedVolumes, node, actualStateOfWorld)
 			if nodeError != nil {
 				klog.Errorf("VerifyVolumesAreAttached failed for volumes %v, node %q with error %v", nodeAttachedVolumes, node, nodeError)
 			}
 		}
 	}
-
+	//如果插件支持大容量校验则执行?  CSI不支持
 	for pluginName, pluginNodeVolumes := range bulkVerifyPluginsByNode {
 		generatedOperations, err := oe.operationGenerator.GenerateBulkVolumeVerifyFunc(
 			pluginNodeVolumes,
@@ -783,6 +793,7 @@ func (oe *operationExecutor) VerifyVolumesAreAttached(
 	}
 }
 
+//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点
 func (oe *operationExecutor) VerifyVolumesAreAttachedPerNode(
 	attachedVolumes []AttachedVolume,
 	nodeName types.NodeName,

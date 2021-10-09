@@ -605,6 +605,8 @@ func (p *csiPlugin) NewDetacher() (volume.Detacher, error) {
 	return p.newAttacherDetacher()
 }
 
+//检测指定卷对应的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略Attach)
+//如果CSIDriver列表中对应驱动不存在, 则不跳过Attach.
 func (p *csiPlugin) CanAttach(spec *volume.Spec) (bool, error) {
 	inlineEnabled := utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume)
 	if inlineEnabled {
@@ -625,7 +627,8 @@ func (p *csiPlugin) CanAttach(spec *volume.Spec) (bool, error) {
 	}
 
 	driverName := pvSrc.Driver
-	//通过CSIDriver.spec.AttachRequired来决定是否要
+	//检测指定的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略Attach)
+	//如果CSIDriver列表中对应驱动不存在, 则不跳过Attach.
 	skipAttach, err := p.skipAttach(driverName)
 	if err != nil {
 		return false, err
@@ -801,7 +804,8 @@ func (p *csiPlugin) ConstructBlockVolumeSpec(podUID types.UID, specVolName, mapP
 
 // skipAttach looks up CSIDriver object associated with driver name
 // to determine if driver requires attachment volume operation
-//检测指定的驱动是否需要跳过挂载步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略挂载?)
+//检测指定的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略Attach)
+//如果CSIDriver对象列表中对应驱动不存在, 则不跳过Attach.
 func (p *csiPlugin) skipAttach(driver string) (bool, error) {
 	kletHost, ok := p.host.(volume.KubeletVolumeHost)
 	if ok {

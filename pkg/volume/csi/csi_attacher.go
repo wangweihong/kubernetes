@@ -65,6 +65,7 @@ var _ volume.Detacher = &csiAttacher{}
 var _ volume.DeviceMounter = &csiAttacher{}
 
 //NodeName:  绑定的节点名
+// 生成VolumeAttachment对象，记录对应的节点和PV名
 func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string, error) {
 	if spec == nil {
 		klog.Error(log("attacher.Attach missing volume.Spec"))
@@ -78,7 +79,7 @@ func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string
 	}
 
 	node := string(nodeName)
-	//从csi卷唯一标识符/csi驱动/节点名,获取对应的VolumeAttachment对象名。
+	//从csi卷唯一标识符/csi驱动/节点名生成VolumeAttachment对象名。
 	attachID := getAttachmentName(pvSrc.VolumeHandle, pvSrc.Driver, node)
 
 	var vaSrc storage.VolumeAttachmentSource
@@ -99,10 +100,10 @@ func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string
 			PersistentVolumeName: &pvName, //VolumeAttachment绑定PV
 		}
 	}
-
+	//初始化VolumeAttachment对象
 	attachment := &storage.VolumeAttachment{
 		ObjectMeta: meta.ObjectMeta{
-			Name: attachID,
+			Name: attachID, //基于驱动/节点名/卷名生成的csi-前缀的名字
 		},
 		Spec: storage.VolumeAttachmentSpec{
 			NodeName: node,
@@ -159,7 +160,7 @@ func (c *csiAttacher) waitForVolumeAttachment(volumeHandle, attachID string, tim
 	return c.waitForVolumeAttachmentInternal(volumeHandle, attachID, timer, timeout)
 }
 
-//监视VolumeAttachment的变化，直到VolumeAttachment.Status满足VolumeAttachment.Status.Attached是否为true或者超时
+//监视VolumeAttachment的变化，直到VolumeAttachment.Status满足VolumeAttachment.Status.Attached为true或者超时
 func (c *csiAttacher) waitForVolumeAttachmentInternal(volumeHandle, attachID string, timer *time.Timer, timeout time.Duration) (string, error) {
 
 	klog.V(4).Info(log("probing VolumeAttachment [id=%v]", attachID))
@@ -176,6 +177,7 @@ func (c *csiAttacher) waitForVolumeAttachmentInternal(volumeHandle, attachID str
 	return attach.Name, nil
 }
 
+//根据卷spec中找到对应插件和nodeName相关的VolumeAttachment对象，根据对应的VolumeAttachment是否存在来判断哪些卷是否Attached
 func (c *csiAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName types.NodeName) (map[*volume.Spec]bool, error) {
 	klog.V(4).Info(log("probing attachment status for %d volume(s) ", len(specs)))
 
@@ -186,6 +188,8 @@ func (c *csiAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName types.No
 			klog.Error(log("attacher.VolumesAreAttached missing volume.Spec"))
 			return nil, errors.New("missing spec")
 		}
+
+		//通过pv获得对应csi的信息
 		pvSrc, err := getPVSourceFromSpec(spec)
 		if err != nil {
 			attached[spec] = false
@@ -194,7 +198,8 @@ func (c *csiAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName types.No
 		}
 		driverName := pvSrc.Driver
 		volumeHandle := pvSrc.VolumeHandle
-
+		//检测指定的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略Attach)
+		//如果CSIDriver对象 列表中对应驱动不存在, 则不跳过Attach.
 		skip, err := c.plugin.skipAttach(driverName)
 		if err != nil {
 			klog.Error(log("Failed to check CSIDriver for %s: %s", driverName, err))
@@ -205,7 +210,7 @@ func (c *csiAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName types.No
 				continue
 			}
 		}
-
+		//从csi卷唯一标识符/csi驱动/节点名,获取对应的VolumeAttachment对象名
 		attachID := getAttachmentName(volumeHandle, driverName, string(nodeName))
 		var attach *storage.VolumeAttachment
 		if c.plugin.volumeAttachmentLister != nil {
@@ -386,6 +391,8 @@ var _ volume.Detacher = &csiAttacher{}
 
 var _ volume.DeviceUnmounter = &csiAttacher{}
 
+//将卷从指定节点Detach掉
+//删除对应的VolumeAttachment对象，然后等待VolumeAttachement attachID被删除或者2分钟超时
 func (c *csiAttacher) Detach(volumeName string, nodeName types.NodeName) error {
 	var attachID string
 	var volID string
@@ -394,7 +401,8 @@ func (c *csiAttacher) Detach(volumeName string, nodeName types.NodeName) error {
 		klog.Error(log("detacher.Detach missing value for parameter volumeName"))
 		return errors.New("missing expected parameter volumeName")
 	}
-	//是CSI VolumeAttachment
+	//是CSI VolumeAttachment？（以csi-为前缀长度为68的字符)
+	// 这里是VolumeAttachment资源对象名csi-216404afe7a859573ab589ca392f5271fd1080f549f69329fa5af9bc2c95cbba
 	if isAttachmentName(volumeName) {
 		// Detach can also be called with the attach ID as the `volumeName`. This codepath is
 		// hit only when we have migrated an in-tree volume to CSI and the A/D Controller is shut
@@ -418,7 +426,7 @@ func (c *csiAttacher) Detach(volumeName string, nodeName types.NodeName) error {
 		volID = parts[1]
 		attachID = getAttachmentName(volID, driverName, string(nodeName))
 	}
-
+	//删除volume attachment对象
 	if err := c.k8s.StorageV1().VolumeAttachments().Delete(context.TODO(), attachID, metav1.DeleteOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			// object deleted or never existed, done
@@ -429,6 +437,7 @@ func (c *csiAttacher) Detach(volumeName string, nodeName types.NodeName) error {
 	}
 
 	klog.V(4).Info(log("detacher deleted ok VolumeAttachment.ID=%s", attachID))
+	//等待VolumeAttachement attachID被删除或者2分钟超时
 	err := c.waitForVolumeDetachment(volID, attachID, csiTimeout)
 	return err
 }

@@ -24,12 +24,12 @@ import (
 )
 
 type Interface interface {
-	Add(item interface{})
-	Len() int
+	Add(item interface{})                   // 写入一个数据，唤醒一个等待的工作进程
+	Len() int                               //队列长度
 	Get() (item interface{}, shutdown bool) //当队列关闭时, 会通过shudown标志告知
-	Done(item interface{})
-	ShutDown() //关闭队列，这会告知所有在等待队列数据的协程
-	ShuttingDown() bool
+	Done(item interface{})                  //某个对象已经被工作线程处理，从正在处理表中移除；如果该对象又被更新了（需要再次处理），再次将对象新数据进行排队，并唤醒一个工作线程开始处理排队的对象
+	ShutDown()                              //关闭队列，这会告知所有在等待队列数据的协程
+	ShuttingDown() bool                     //检测队列是否正常关闭
 }
 
 // New constructs a new work queue (see the package comment).

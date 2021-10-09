@@ -37,8 +37,10 @@ const (
 )
 
 // BlockVolumePathHandler defines a set of operations for handling block volume-related operations
+// 这里通过系统调用来执行挂载/卸载等块设备相关操作
 type BlockVolumePathHandler interface {
 	// MapDevice creates a symbolic link to block device under specified map path
+	// 对devicepath通过符号连接或者Bindmount到 mapPath/linkName, mapPath是绝对路径
 	MapDevice(devicePath string, mapPath string, linkName string, bindMount bool) error
 	// UnmapDevice removes a symbolic link to block device under specified map path
 	UnmapDevice(mapPath string, linkName string, bindMount bool) error
@@ -74,6 +76,7 @@ type VolumePathHandler struct {
 }
 
 // MapDevice creates a symbolic link to block device under specified map path
+// 对devicepath通过符号连接或者Bindmount到 mapPath/linkName, mapPath是绝对路径
 func (v VolumePathHandler) MapDevice(devicePath string, mapPath string, linkName string, bindMount bool) error {
 	// Example of global map path:
 	//   globalMapPath/linkName: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{podUid}
@@ -103,10 +106,11 @@ func (v VolumePathHandler) MapDevice(devicePath string, mapPath string, linkName
 	if err = os.MkdirAll(mapPath, 0750); err != nil {
 		return fmt.Errorf("failed to mkdir %s: %v", mapPath, err)
 	}
-
+	// 对devicePath执行BindMount操作
 	if bindMount {
 		return mapBindMountDevice(v, devicePath, mapPath, linkName)
 	}
+	//移除 mappath/linkName文件，然后建立devicePath的符号链接mappath/linkName
 	return mapSymlinkDevice(v, devicePath, mapPath, linkName)
 }
 
@@ -141,6 +145,7 @@ func mapBindMountDevice(v VolumePathHandler, devicePath string, mapPath string, 
 
 	// Bind mount file
 	mounter := &mount.SafeFormatAndMount{Interface: mount.New(""), Exec: utilexec.New()}
+	//调用mount命令进行devicePath的bind mount
 	if err := mounter.Mount(devicePath, linkPath, "" /* fsType */, []string{"bind"}); err != nil {
 		return fmt.Errorf("failed to bind mount devicePath: %s to linkPath %s: %v", devicePath, linkPath, err)
 	}
@@ -148,6 +153,7 @@ func mapBindMountDevice(v VolumePathHandler, devicePath string, mapPath string, 
 	return nil
 }
 
+//移除 mappath/linkName文件，然后建立devicePath的符号链接mappath/linkName
 func mapSymlinkDevice(v VolumePathHandler, devicePath string, mapPath string, linkName string) error {
 	// Remove old symbolic link(or file) then create new one.
 	// This should be done because current symbolic link is

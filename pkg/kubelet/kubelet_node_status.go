@@ -285,7 +285,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 			LastTransitionTime: metav1.NewTime(kl.clock.Now()),
 		})
 	}
-
+	//如果kubelet设置了enable-controller-attach-detach参数, 设置节点annotation
 	if kl.enableControllerAttachDetach {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)
@@ -296,7 +296,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 	} else {
 		klog.Infof("Controller attach/detach is disabled for this node; Kubelet will attach and detach volumes")
 	}
-
+	//调试用
 	if kl.keepTerminatedPodVolumes {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)

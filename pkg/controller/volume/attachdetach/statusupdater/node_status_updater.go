@@ -32,13 +32,15 @@ import (
 
 // NodeStatusUpdater defines a set of operations for updating the
 // VolumesAttached field in the Node Status.
+///遍历所有中实际节实际已Attached表，更新node.Status.AttachedVolume表。如果更新失败，设置actualStateOfWorld该节点需要更新标志进行重试。
 type NodeStatusUpdater interface {
 	// Gets a list of node statuses that should be updated from the actual state
 	// of the world and updates them.
-	UpdateNodeStatuses() error
+	UpdateNodeStatuses() error //遍历所有中实际节实际已Attached表，更新node.Status.AttachedVolume表。如果更新失败，设置actualStateOfWorld该节点需要更新标志等待下次NodeStatusUpdater更新重试。
 }
 
 // NewNodeStatusUpdater returns a new instance of NodeStatusUpdater.
+// 负责根据Attached卷以及相应的节点信息，更新到node.status.AttachedVolume中
 func NewNodeStatusUpdater(
 	kubeClient clientset.Interface,
 	nodeLister corelisters.NodeLister,
@@ -52,13 +54,15 @@ func NewNodeStatusUpdater(
 
 type nodeStatusUpdater struct {
 	kubeClient         clientset.Interface
-	nodeLister         corelisters.NodeLister
-	actualStateOfWorld cache.ActualStateOfWorld
+	nodeLister         corelisters.NodeLister   //节点列表
+	actualStateOfWorld cache.ActualStateOfWorld //卷/节点Attached接口
 }
 
+//遍历所有中实际节实际已Attached表，更新node.Status.AttachedVolume表。如果更新失败，设置actualStateOfWorld该节点需要更新标志进行重试。
 func (nsu *nodeStatusUpdater) UpdateNodeStatuses() error {
 	// TODO: investigate right behavior if nodeName is empty
 	// kubernetes/kubernetes/issues/37777
+	//遍历所有节点实际已Attached卷信息
 	nodesToUpdate := nsu.actualStateOfWorld.GetVolumesToReportAttached()
 	for nodeName, attachedVolumes := range nodesToUpdate {
 		nodeObj, err := nsu.nodeLister.Get(string(nodeName))
@@ -70,6 +74,7 @@ func (nsu *nodeStatusUpdater) UpdateNodeStatuses() error {
 				nodeName,
 				err)
 			continue
+			//获取节点失败。设置节点需要更新，进行下次重试
 		} else if err != nil {
 			// For all other errors, log error and reset flag statusUpdateNeeded
 			// back to true to indicate this node status needs to be updated again.
@@ -77,10 +82,11 @@ func (nsu *nodeStatusUpdater) UpdateNodeStatuses() error {
 			nsu.actualStateOfWorld.SetNodeStatusUpdateNeeded(nodeName)
 			continue
 		}
-
+		//更新node.status的AttchedVolume表。
 		if err := nsu.updateNodeStatus(nodeName, nodeObj, attachedVolumes); err != nil {
 			// If update node status fails, reset flag statusUpdateNeeded back to true
 			// to indicate this node status needs to be updated again
+			//获取节点失败。设置节点需要更新，进行下次重试
 			nsu.actualStateOfWorld.SetNodeStatusUpdateNeeded(nodeName)
 
 			klog.V(2).Infof(
@@ -95,6 +101,7 @@ func (nsu *nodeStatusUpdater) UpdateNodeStatuses() error {
 	return nil
 }
 
+//更新node对象node.status的AttchedVolume表。
 func (nsu *nodeStatusUpdater) updateNodeStatus(nodeName types.NodeName, nodeObj *v1.Node, attachedVolumes []v1.AttachedVolume) error {
 	node := nodeObj.DeepCopy()
 	node.Status.VolumesAttached = attachedVolumes

@@ -274,7 +274,8 @@ type KubeletConfiguration struct {
 	// enableControllerAttachDetach enables the Attach/Detach controller to
 	// manage attachment/detachment of volumes scheduled to this node, and
 	// disables kubelet from executing any attach/detach operations
-	EnableControllerAttachDetach bool //当设置后，kubelet不再进行卷的挂载/卸载。而由volume attach/detach controller来执行挂载/卸载? 什么时候才需要设置该标志为true.
+	EnableControllerAttachDetach bool //当设置后，kubelet不再进行卷的Attach/Detach。而由volume attach/detach controller来执行Attach/Detach?
+	//默认为True.
 	// protectKernelDefaults, if true, causes the Kubelet to error if kernel
 	// flags are not as it expects. Otherwise the Kubelet will attempt to modify
 	// kernel flags to match its expectation.

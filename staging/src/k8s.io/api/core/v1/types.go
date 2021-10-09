@@ -4481,13 +4481,14 @@ type NodeStatus struct {
 	VolumesInUse []UniqueVolumeName `json:"volumesInUse,omitempty" protobuf:"bytes,9,rep,name=volumesInUse"`
 	// List of volumes that are attached to the node.
 	// +optional
-	VolumesAttached []AttachedVolume `json:"volumesAttached,omitempty" protobuf:"bytes,10,rep,name=volumesAttached"`
+	VolumesAttached []AttachedVolume `json:"volumesAttached,omitempty" protobuf:"bytes,10,rep,name=volumesAttached"` //已经Attached到节点上的表
 	// Status of the config assigned to the node via the dynamic Kubelet config feature.
 	// +optional
 	Config *NodeConfigStatus `json:"config,omitempty" protobuf:"bytes,11,opt,name=config"`
 }
 
-type UniqueVolumeName string
+type UniqueVolumeName string //注意：这里的卷，取决于具体的插件/驱动/卷名。如csiPlugin: kubernetes.io/csi/<csiDriverName>^volumeName, csiDriver为注册的驱动
+//kubernetes.io/csi/topsc.topke.io^pvc-74b0a0e4-fee0-4bd4-a2f3-c35a07b183dd
 
 // AttachedVolume describes a volume attached to a node
 type AttachedVolume struct {

@@ -57,6 +57,7 @@ import (
 // detach controller.
 // The list of plugins is manually compiled. This code and the plugin
 // initialization code for kubelet really, really need a through refactor.
+// 卷可附加controller， *NFS不需要附加*
 func ProbeAttachableVolumePlugins() ([]volume.VolumePlugin, error) {
 	var err error
 	allPlugins := []volume.VolumePlugin{}

@@ -305,6 +305,7 @@ func startPersistentVolumeBinderController(ctx ControllerContext) (http.Handler,
 	return nil, true, nil
 }
 
+//启动controller-manager的attachDetachController
 func startAttachDetachController(ctx ControllerContext) (http.Handler, bool, error) {
 	if ctx.ComponentConfig.AttachDetachController.ReconcilerSyncLoopPeriod.Duration < time.Second {
 		return nil, true, fmt.Errorf("duration time must be greater than one second as set via command line option reconcile-sync-loop-period")
@@ -313,16 +314,17 @@ func startAttachDetachController(ctx ControllerContext) (http.Handler, bool, err
 	var (
 		csiNodeInformer storagev1informer.CSINodeInformer
 	)
+	//监听CSINode以及CSIDriver
 	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
 		csiNodeInformer = ctx.InformerFactory.Storage().V1().CSINodes()
 	}
 	csiDriverInformer := ctx.InformerFactory.Storage().V1().CSIDrivers()
-
+	// k8s各种可附加到节点上的插件
 	plugins, err := ProbeAttachableVolumePlugins()
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to probe volume plugins when starting attach/detach controller: %v", err)
 	}
-
+	//创建Attach/Detach控制器
 	attachDetachController, attachDetachControllerErr :=
 		attachdetach.NewAttachDetachController(
 			ctx.ClientBuilder.ClientOrDie("attachdetach-controller"),

@@ -158,7 +158,7 @@ func BackoffUntil(f func(), backoff BackoffManager, sliding bool, stopCh <-chan 
 			defer runtime.HandleCrash()
 			f()
 		}()
-
+		//计算下一次执行时间
 		if sliding {
 			t = backoff.Backoff()
 		}
@@ -314,6 +314,7 @@ func contextForChannel(parentCh <-chan struct{}) (context.Context, context.Cance
 // undetermined behavior.
 // The BackoffManager is supposed to be called in a single-threaded environment.
 type BackoffManager interface {
+	// 启动一个定时器，在下次退避时间到来时唤醒
 	Backoff() clock.Timer
 }
 
@@ -329,6 +330,7 @@ type exponentialBackoffManagerImpl struct {
 // NewExponentialBackoffManager returns a manager for managing exponential backoff. Each backoff is jittered and
 // backoff will not exceed the given max. If the backoff is not called within resetDuration, the backoff is reset.
 // This backoff manager is used to reduce load during upstream unhealthiness.
+// 指数增长
 func NewExponentialBackoffManager(initBackoff, maxBackoff, resetDuration time.Duration, backoffFactor, jitter float64, c clock.Clock) BackoffManager {
 	return &exponentialBackoffManagerImpl{
 		backoff: &Backoff{
@@ -371,13 +373,14 @@ func (b *exponentialBackoffManagerImpl) Backoff() clock.Timer {
 
 type jitteredBackoffManagerImpl struct {
 	clock        clock.Clock
-	duration     time.Duration
-	jitter       float64
+	duration     time.Duration //退避间隔
+	jitter       float64       //误差值。如果设置了误差，每次退避间隔时间为[duration: duration+jitter*duration]
 	backoffTimer clock.Timer
 }
 
 // NewJitteredBackoffManager returns a BackoffManager that backoffs with given duration plus given jitter. If the jitter
 // is negative, backoff will not be jittered.
+//基于误差的退避器，如果没有指定误差，就是duration周期的退避器，否则退避间隔为[duration: duration+jitter*duration]之间的随机数
 func NewJitteredBackoffManager(duration time.Duration, jitter float64, c clock.Clock) BackoffManager {
 	return &jitteredBackoffManagerImpl{
 		clock:        c,
@@ -387,9 +390,11 @@ func NewJitteredBackoffManager(duration time.Duration, jitter float64, c clock.C
 	}
 }
 
+//计算出下一次退避时间(如果设置了误差，返回[duration: duration+jitter*duration]范围内的一个随机值)
 func (j *jitteredBackoffManagerImpl) getNextBackoff() time.Duration {
 	jitteredPeriod := j.duration
 	if j.jitter > 0.0 {
+		// 误差。返回[duration: duration+jitter*duration]范围内的一个随机值
 		jitteredPeriod = Jitter(j.duration, j.jitter)
 	}
 	return jitteredPeriod
@@ -397,7 +402,9 @@ func (j *jitteredBackoffManagerImpl) getNextBackoff() time.Duration {
 
 // Backoff implements BackoffManager.Backoff, it returns a timer so caller can block on the timer for jittered backoff.
 // The returned timer must be drained before calling Backoff() the second time
+// 启动一个定时器，在下次退避时间到来时唤醒
 func (j *jitteredBackoffManagerImpl) Backoff() clock.Timer {
+	//计算出下一次退避时间(如果设置了误差，返回[duration: duration+jitter*duration]范围内的一个随机值)
 	backoff := j.getNextBackoff()
 	if j.backoffTimer == nil {
 		j.backoffTimer = j.clock.NewTimer(backoff)

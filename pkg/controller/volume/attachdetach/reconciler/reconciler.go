@@ -85,19 +85,20 @@ func NewReconciler(
 }
 
 type reconciler struct {
-	loopPeriod                time.Duration
-	maxWaitForUnmountDuration time.Duration
+	loopPeriod                time.Duration //默认100毫秒
+	maxWaitForUnmountDuration time.Duration //默认6分钟。 卷/节点Detach请求发起后，如果超过6分钟卷仍然挂载节点上，则强制进行Detach操作
 	syncDuration              time.Duration
-	desiredStateOfWorld       cache.DesiredStateOfWorld
-	actualStateOfWorld        cache.ActualStateOfWorld
+	desiredStateOfWorld       cache.DesiredStateOfWorld // 期待Attached表
+	actualStateOfWorld        cache.ActualStateOfWorld  // 实际发起Attach表(不一定Attached)
 	attacherDetacher          operationexecutor.OperationExecutor
-	nodeStatusUpdater         statusupdater.NodeStatusUpdater
-	timeOfLastSync            time.Time
+	nodeStatusUpdater         statusupdater.NodeStatusUpdater //用来根据actualStateOfWorld确认已Attached的卷来更新节点的node.status.AttachVolume表。更新失败会重试
+	timeOfLastSync            time.Time                       //上一次执行sync动作的结束时间
 	disableReconciliationSync bool
 	recorder                  record.EventRecorder
 }
 
 func (rc *reconciler) Run(stopCh <-chan struct{}) {
+	//每隔100毫秒执行一次reconciliationLoopFunc。
 	wait.Until(rc.reconciliationLoopFunc(), rc.loopPeriod, stopCh)
 }
 
@@ -120,17 +121,24 @@ func (rc *reconciler) reconciliationLoopFunc() func() {
 	}
 }
 
+//
 func (rc *reconciler) sync() {
-	defer rc.updateSyncTime()
+	defer rc.updateSyncTime() //更新最后同步时间
+	//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点、
 	rc.syncStates()
 }
 
+//更新调和器的上一次同步时间
 func (rc *reconciler) updateSyncTime() {
 	rc.timeOfLastSync = time.Now()
 }
 
+//调用attachedVolumes对应的插件来检测卷是否仍然Attached, 如果不再Attached则更新actualStateOfWorld表，移除对应卷-节点、
 func (rc *reconciler) syncStates() {
+	//actualStateOfWorld中确定已经attached卷和节点
 	volumesPerNode := rc.actualStateOfWorld.GetAttachedVolumesPerNode()
+	//调用卷插件来确认卷是否仍然Attached到节点上（CSI插件: 卷节点相关的VolumeAttachment.status.Bind仍然为true)
+	//不再Attached, 则从actualStateOfWorld中移除
 	rc.attacherDetacher.VerifyVolumesAreAttached(volumesPerNode, rc.actualStateOfWorld)
 }
 
@@ -139,7 +147,9 @@ func (rc *reconciler) reconcile() {
 	// pods that are rescheduled to a different node are detached first.
 
 	// Ensure volumes that should be detached are detached.
+	// 拿到所有已经Attached到节点上的卷，以及对应节点的信息
 	for _, attachedVolume := range rc.actualStateOfWorld.GetAttachedVolumes() {
+		//如果不再期待卷Attached到节点上
 		if !rc.desiredStateOfWorld.VolumeExists(
 			attachedVolume.VolumeName, attachedVolume.NodeName) {
 
@@ -150,6 +160,8 @@ func (rc *reconciler) reconcile() {
 			// double detach attempts
 			// The operation key format is different depending on whether the volume
 			// allows multi attach across different nodes.
+			// 检测卷是否支持Attached到多个节点。PV根据AccessMode来判断
+			// 如果支持多节点Attached？？？
 			if util.IsMultiAttachAllowed(attachedVolume.VolumeSpec) {
 				if rc.attacherDetacher.IsOperationPending(attachedVolume.VolumeName, "" /* podName */, attachedVolume.NodeName) {
 					klog.V(10).Infof("Operation for volume %q is already running for node %q. Can't start detach", attachedVolume.VolumeName, attachedVolume.NodeName)
@@ -169,7 +181,9 @@ func (rc *reconciler) reconcile() {
 			// Check the ActualStateOfWorld again to avoid issuing an unnecessary
 			// detach.
 			// See https://github.com/kubernetes/kubernetes/issues/93902
+			//获取卷在指定节点的Attach状态
 			attachState := rc.actualStateOfWorld.GetAttachState(attachedVolume.VolumeName, attachedVolume.NodeName)
+			//Detached状态。（已经不在actualStateOfWorld表中), 则忽略
 			if attachState == cache.AttachStateDetached {
 				if klog.V(5) {
 					klog.Infof(attachedVolume.GenerateMsgDetailed("Volume detached--skipping", ""))
@@ -178,14 +192,17 @@ func (rc *reconciler) reconcile() {
 			}
 
 			// Set the detach request time
+			//设置当前时间为Detach请求时间
 			elapsedTime, err := rc.actualStateOfWorld.SetDetachRequestTime(attachedVolume.VolumeName, attachedVolume.NodeName)
 			if err != nil {
 				klog.Errorf("Cannot trigger detach because it fails to set detach request time with error %v", err)
 				continue
 			}
 			// Check whether timeout has reached the maximum waiting time
+			// 距离Detach发起时间已超过六个小时
 			timeout := elapsedTime > rc.maxWaitForUnmountDuration
 			// Check whether volume is still mounted. Skip detach if it is still mounted unless timeout
+			//如果卷仍然挂载，而且Detach请求发起时间未超过6小时，忽略
 			if attachedVolume.MountedByNode && !timeout {
 				klog.V(5).Infof(attachedVolume.GenerateMsgDetailed("Cannot detach volume because it is still mounted", ""))
 				continue
@@ -193,6 +210,8 @@ func (rc *reconciler) reconcile() {
 
 			// Before triggering volume detach, mark volume as detached and update the node status
 			// If it fails to update node status, skip detach volume
+			// 超过六个小时，或者卷未挂载到主机上。
+			// 将卷从节点的AttachedVolume列表中移除
 			err = rc.actualStateOfWorld.RemoveVolumeFromReportAsAttached(attachedVolume.VolumeName, attachedVolume.NodeName)
 			if err != nil {
 				klog.V(5).Infof("RemoveVolumeFromReportAsAttached failed while removing volume %q from node %q with: %v",
@@ -202,6 +221,8 @@ func (rc *reconciler) reconcile() {
 			}
 
 			// Update Node Status to indicate volume is no longer safe to mount.
+			//更新节点的状态，将卷从AttachedVolume中移除。
+			//如果更新失败，下次重试
 			err = rc.nodeStatusUpdater.UpdateNodeStatuses()
 			if err != nil {
 				// Skip detaching this volume if unable to update node status
@@ -212,6 +233,7 @@ func (rc *reconciler) reconcile() {
 			// Trigger detach volume which requires verifying safe to detach step
 			// If timeout is true, skip verifySafeToDetach check
 			klog.V(5).Infof(attachedVolume.GenerateMsgDetailed("Starting attacherDetacher.DetachVolume", ""))
+			//如果超时，说明卷仍然挂载在节点上
 			verifySafeToDetach := !timeout
 			err = rc.attacherDetacher.DetachVolume(attachedVolume.AttachedVolume, verifySafeToDetach, rc.actualStateOfWorld)
 			if err == nil {
@@ -233,6 +255,7 @@ func (rc *reconciler) reconcile() {
 	rc.attachDesiredVolumes()
 
 	// Update Node Status
+	//遍历所有中实际节实际已Attached表，更新node.Status.AttachedVolume表。如果更新失败，设置actualStateOfWorld该节点需要更新标志等下nodeStatusUpdater更新重试。
 	err := rc.nodeStatusUpdater.UpdateNodeStatuses()
 	if err != nil {
 		klog.Warningf("UpdateNodeStatuses failed with: %v", err)
@@ -241,7 +264,9 @@ func (rc *reconciler) reconcile() {
 
 func (rc *reconciler) attachDesiredVolumes() {
 	// Ensure volumes that should be attached are attached.
+	// 获取所有期待卷/节点
 	for _, volumeToAttach := range rc.desiredStateOfWorld.GetVolumesToAttach() {
+		// 卷如果支持Attached到多个节点
 		if util.IsMultiAttachAllowed(volumeToAttach.VolumeSpec) {
 			// Don't even try to start an operation if there is already one running for the given volume and node.
 			if rc.attacherDetacher.IsOperationPending(volumeToAttach.VolumeName, "" /* podName */, volumeToAttach.NodeName) {
@@ -265,18 +290,23 @@ func (rc *reconciler) attachDesiredVolumes() {
 		// GetAttachState() to guarantee the ActualStateOfWorld is
 		// up-to-date when it's read.
 		// See https://github.com/kubernetes/kubernetes/issues/93902
+		// 获取卷/节点的Attach状态，Detach/Uncertain/Attached.
 		attachState := rc.actualStateOfWorld.GetAttachState(volumeToAttach.VolumeName, volumeToAttach.NodeName)
+		// 卷已经在节点Attached
 		if attachState == cache.AttachStateAttached {
 			// Volume/Node exists, touch it to reset detachRequestedTime
 			if klog.V(5) {
 				klog.Infof(volumeToAttach.GenerateMsgDetailed("Volume attached--touching", ""))
 			}
+			//清掉卷/节点的Detach请求发起时间. 如果之前有在Detach，则不再进行
 			rc.actualStateOfWorld.ResetDetachRequestTime(volumeToAttach.VolumeName, volumeToAttach.NodeName)
 			continue
 		}
-
+		// 检测卷是否支持Attached到多个节点。PV根据AccessMode来判断. 如果不支持Attach到多个节点
 		if !util.IsMultiAttachAllowed(volumeToAttach.VolumeSpec) {
+			//获取卷实际已Attached的节点列表
 			nodes := rc.actualStateOfWorld.GetNodesForAttachedVolume(volumeToAttach.VolumeName)
+			// 卷已经Attached到节点上
 			if len(nodes) > 0 {
 				if !volumeToAttach.MultiAttachErrorReported {
 					rc.reportMultiAttachError(volumeToAttach, nodes)
@@ -290,6 +320,8 @@ func (rc *reconciler) attachDesiredVolumes() {
 		if klog.V(5) {
 			klog.Infof(volumeToAttach.GenerateMsgDetailed("Starting attacherDetacher.AttachVolume", ""))
 		}
+
+		// 调用卷对应的插件对卷进行Attached, 并根据
 		err := rc.attacherDetacher.AttachVolume(volumeToAttach.VolumeToAttach, rc.actualStateOfWorld)
 		if err == nil {
 			klog.Infof(volumeToAttach.GenerateMsgDetailed("attacherDetacher.AttachVolume started", ""))
@@ -304,6 +336,8 @@ func (rc *reconciler) attachDesiredVolumes() {
 
 // reportMultiAttachError sends events and logs situation that a volume that
 // should be attached to a node is already attached to different node(s).
+// 当卷不再支持多节点Attach时，但之前已经Attached了多个节点时执行
+// 通过更改PVC的访问模式(ReadMany*)来判断是否支持多挂
 func (rc *reconciler) reportMultiAttachError(volumeToAttach cache.VolumeToAttach, nodes []types.NodeName) {
 	// Filter out the current node from list of nodes where the volume is
 	// attached.
@@ -321,6 +355,7 @@ func (rc *reconciler) reportMultiAttachError(volumeToAttach cache.VolumeToAttach
 	}
 
 	// Get list of pods that use the volume on the other nodes.
+	//获得引用了nodes节点列表上attached的卷volumeName且已经调度到某个节点上的Pod列表
 	pods := rc.desiredStateOfWorld.GetVolumePodsOnNodes(otherNodes, volumeToAttach.VolumeName)
 
 	if len(pods) == 0 {

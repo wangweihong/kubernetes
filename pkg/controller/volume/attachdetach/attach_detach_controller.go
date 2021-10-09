@@ -129,7 +129,7 @@ func NewAttachDetachController(
 		podIndexer:  podInformer.Informer().GetIndexer(),
 		nodeLister:  nodeInformer.Lister(),
 		nodesSynced: nodeInformer.Informer().HasSynced,
-		cloud:       cloud,
+		cloud:       cloud, //和cloud provider有关???
 		pvcQueue:    workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "pvcs"),
 	}
 
@@ -138,17 +138,17 @@ func NewAttachDetachController(
 		adc.csiNodeLister = csiNodeInformer.Lister()
 		adc.csiNodeSynced = csiNodeInformer.Informer().HasSynced
 	}
-
+	// CSIDriver是谁创建的?
 	adc.csiDriverLister = csiDriverInformer.Lister()
 	adc.csiDriversSynced = csiDriverInformer.Informer().HasSynced
-
+	// VolumeAttachment在卷与节点执行Attach动作时创建的(CSI插件)
 	adc.volumeAttachmentLister = volumeAttachmentInformer.Lister()
 	adc.volumeAttachmentSynced = volumeAttachmentInformer.Informer().HasSynced
-
+	// 遍历所有管理的插件(CSI,local以及其他内置卷插件)，进行初始化
 	if err := adc.volumePluginMgr.InitPlugins(plugins, prober, adc); err != nil {
 		return nil, fmt.Errorf("Could not initialize volume plugins for Attach/Detach Controller: %+v", err)
 	}
-
+	//转发事件到apiserver事件列表中
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
@@ -193,7 +193,7 @@ func NewAttachDetachController(
 		pvInformer.Lister(),
 		adc.csiMigratedPluginManager,
 		adc.intreeToCSITranslator)
-
+	//监听Pod创建/更新/删除
 	podInformer.Informer().AddEventHandler(kcache.ResourceEventHandlerFuncs{
 		AddFunc:    adc.podAdd,
 		UpdateFunc: adc.podUpdate,
@@ -208,7 +208,7 @@ func NewAttachDetachController(
 	if err != nil {
 		klog.Warningf("adding indexer got %v", err)
 	}
-
+	//监听节点的创建/更新/删除
 	nodeInformer.Informer().AddEventHandler(kcache.ResourceEventHandlerFuncs{
 		AddFunc:    adc.nodeAdd,
 		UpdateFunc: adc.nodeUpdate,
@@ -302,7 +302,7 @@ type attachDetachController struct {
 	// pods are scheduled to those nodes referencing the volumes.
 	// The data structure is populated by the controller using a stream of node
 	// and pod API server objects fetched by the informers.
-	desiredStateOfWorld cache.DesiredStateOfWorld
+	desiredStateOfWorld cache.DesiredStateOfWorld //记录卷期待Attach卷的信息
 
 	// actualStateOfWorld is a data structure containing the actual state of
 	// the world according to this controller: i.e. which volumes are attached
@@ -310,7 +310,7 @@ type attachDetachController struct {
 	// The data structure is populated upon successful completion of attach and
 	// detach actions triggered by the controller and a periodic sync with
 	// storage providers for the "true" state of the world.
-	actualStateOfWorld cache.ActualStateOfWorld
+	actualStateOfWorld cache.ActualStateOfWorld //记录发起Attach卷的信息，但这里只是描述Attach关系,并不确定是否Attach成功
 
 	// attacherDetacher is used to start asynchronous attach and operations
 	attacherDetacher operationexecutor.OperationExecutor
@@ -322,7 +322,7 @@ type attachDetachController struct {
 
 	// nodeStatusUpdater is used to update node status with the list of attached
 	// volumes
-	nodeStatusUpdater statusupdater.NodeStatusUpdater
+	nodeStatusUpdater statusupdater.NodeStatusUpdater //节点状态更新器。会更新node.status.AttachedVolume表。如果更新失败会重试。
 
 	// desiredStateOfWorldPopulator runs an asynchronous periodic loop to
 	// populate the current pods using podInformer.
@@ -386,6 +386,7 @@ func (adc *attachDetachController) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
+//填充实际Attach表
 func (adc *attachDetachController) populateActualStateOfWorld() error {
 	klog.V(5).Infof("Populating ActualStateOfworld")
 	nodes, err := adc.nodeLister.List(labels.Everything())
@@ -393,8 +394,10 @@ func (adc *attachDetachController) populateActualStateOfWorld() error {
 		return err
 	}
 
+	//遍历所有节点上已经Attached的节点
 	for _, node := range nodes {
 		nodeName := types.NodeName(node.Name)
+		// 谁更新node.Status.VolumesAttached？？
 		for _, attachedVolume := range node.Status.VolumesAttached {
 			uniqueName := attachedVolume.Name
 			// The nil VolumeSpec is safe only in the case the volume is not in use by any pod.
@@ -465,6 +468,7 @@ func (adc *attachDetachController) populateDesiredStateOfWorld() error {
 					err)
 				continue
 			}
+			// 根据卷规格找到卷插件，检测卷的插件是否能够支持Attach/Detach操作
 			plugin, err := adc.volumePluginMgr.FindAttachablePluginBySpec(volumeSpec)
 			if err != nil || plugin == nil {
 				klog.V(10).Infof(
@@ -507,16 +511,18 @@ func (adc *attachDetachController) populateDesiredStateOfWorld() error {
 	return nil
 }
 
+//监听已经调度的Pod的创建。
 func (adc *attachDetachController) podAdd(obj interface{}) {
 	pod, ok := obj.(*v1.Pod)
 	if pod == nil || !ok {
 		return
 	}
+	//未调度的Pod则不管。
 	if pod.Spec.NodeName == "" {
 		// Ignore pods without NodeName, indicating they are not scheduled.
 		return
 	}
-
+	//调试用
 	volumeActionFlag := util.DetermineVolumeAction(
 		pod,
 		adc.desiredStateOfWorld,
@@ -595,11 +601,12 @@ func (adc *attachDetachController) nodeDelete(obj interface{}) {
 	}
 
 	nodeName := types.NodeName(node.Name)
+	//将节点从节点attach管理表中移除，如果节点仍有attached的卷，报错不进行移除操作。
 	if err := adc.desiredStateOfWorld.DeleteNode(nodeName); err != nil {
 		// This might happen during drain, but we still want it to appear in our logs
 		klog.Infof("error removing node %q from desired-state-of-world: %v", nodeName, err)
 	}
-
+	//根据node.Status.VolumeInUse来更新actualStateOfWorld中卷/节点的挂载关系
 	adc.processVolumesInUse(nodeName, node.Status.VolumesInUse)
 }
 
@@ -684,9 +691,11 @@ func (adc *attachDetachController) syncPVCByKey(key string) error {
 // according to the specified Node's Status.VolumesInUse and updates the
 // corresponding volume in the actual state of the world to indicate that it is
 // mounted.
+//根据node.Status.VolumeInUse来更新actualStateOfWorld中卷/节点的挂载关系
 func (adc *attachDetachController) processVolumesInUse(
 	nodeName types.NodeName, volumesInUse []v1.UniqueVolumeName) {
 	klog.V(4).Infof("processVolumesInUse for node %q", nodeName)
+	//对比node.Status.VolumeInUse和actualStateOfWorld表节点卷挂载信息中，
 	for _, attachedVolume := range adc.actualStateOfWorld.GetAttachedVolumesForNode(nodeName) {
 		mounted := false
 		for _, volumeInUse := range volumesInUse {
@@ -695,6 +704,7 @@ func (adc *attachDetachController) processVolumesInUse(
 				break
 			}
 		}
+		//更新actualStateOfWorld中卷/节点的挂载关系
 		err := adc.actualStateOfWorld.SetVolumeMountedByNode(attachedVolume.VolumeName, nodeName, mounted)
 		if err != nil {
 			klog.Warningf(
@@ -718,6 +728,7 @@ func (adc *attachDetachController) processVolumeAttachments() error {
 		klog.Errorf("failed to list VolumeAttachment objects: %v", err)
 		return err
 	}
+	// 遍历所有volumeAttachment(问题？什么情况下或有
 	for _, va := range vas {
 		nodeName := types.NodeName(va.Spec.NodeName)
 		pvName := va.Spec.Source.PersistentVolumeName
@@ -734,8 +745,9 @@ func (adc *attachDetachController) processVolumeAttachments() error {
 		}
 		//创建卷在kubelet的内部表示，默认是只读?
 		volumeSpec := volume.NewSpecFromPersistentVolume(pv, false)
-		//
+		//检测VolumeSpec所在的插件是否支持Attach, 不能支持Attach则plugin为nil
 		plugin, err := adc.volumePluginMgr.FindAttachablePluginBySpec(volumeSpec)
+		// 无法确认插件是否支持Attach操作或者插件明确不支持Attach操作，则不再处理。
 		if err != nil || plugin == nil {
 			// Currently VA objects are created for CSI volumes only. nil plugin is unexpected, generate a warning
 			klog.Warningf(
@@ -877,7 +889,10 @@ func (adc *attachDetachController) GetExec(pluginName string) utilexec.Interface
 	return utilexec.New()
 }
 
+//如果节点由attach-detach controller进行attach-detach, 将节点加入到卷期待attached表中。
 func (adc *attachDetachController) addNodeToDswp(node *v1.Node, nodeName types.NodeName) {
+	//如果节点的annotation设置了volumes.kubernetes.io/controller-managed-attach-detach，由attach-detach controller对
+	//调度到该节点上的pod的卷进行Attach/Detach. 否则由kubelet进行。默认由attach-detach controller进行
 	if _, exists := node.Annotations[volumeutil.ControllerManagedAttachAnnotation]; exists {
 		keepTerminatedPodVolumes := false
 

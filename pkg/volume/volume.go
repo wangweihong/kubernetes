@@ -231,17 +231,21 @@ type Attacher interface {
 	// Attaches the volume specified by the given spec to the node with the given Name.
 	// On success, returns the device path where the device was attached on the
 	// node.
+	//不同插件有不同行为，如果是CSI插件则生成VolumeAttachment对象，记录对应的节点和PV名，然后监视VolumeAttachment的变化，直到VolumeAttachment.Status满足VolumeAttachment.Status.Attached为true或者超时
+	// CSI插件即使成功返回的设备路径也为空
 	Attach(spec *Spec, nodeName types.NodeName) (string, error)
 
 	// VolumesAreAttached checks whether the list of volumes still attached to the specified
 	// node. It returns a map which maps from the volume spec to the checking result.
 	// If an error is occurred during checking, the error will be returned
+	//CSI:根据卷spec中找到对应csi插件，并结合nodeName获取相关的VolumeAttachment对象ID，根据对应的VolumeAttachment是否存在来判断哪些卷是否Attached
 	VolumesAreAttached(specs []*Spec, nodeName types.NodeName) (map[*Spec]bool, error)
 
 	// WaitForAttach blocks until the device is attached to this
 	// node. If it successfully attaches, the path to the device
 	// is returned. Otherwise, if the device does not attach after
 	// the given timeout period, an error will be returned.
+	//CSI插件： 监视spec相关的VolumeAttachment的变化，直到VolumeAttachment.Status满足VolumeAttachment.Status.Attached是否为true或者超时
 	WaitForAttach(spec *Spec, devicePath string, pod *v1.Pod, timeout time.Duration) (string, error)
 }
 
@@ -276,6 +280,8 @@ type Detacher interface {
 	// Detach the given volume from the node with the given Name.
 	// volumeName is name of the volume as returned from plugin's
 	// GetVolumeName().
+	// Detach操作取决于插件。
+	// CSI插件删除对应的VolumeAttachment对象，然后等待VolumeAttachement attachID被删除或者2分钟超时
 	Detach(volumeName string, nodeName types.NodeName) error
 }
 

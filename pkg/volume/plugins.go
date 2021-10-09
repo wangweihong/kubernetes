@@ -150,7 +150,7 @@ type VolumePlugin interface {
 	// For Attachable volumes, this value must be able to be passed back to
 	// volume Detach methods to identify the device to act on.
 	// If the plugin does not support the given spec, this returns an error.
-	GetVolumeName(spec *Spec) (string, error)
+	GetVolumeName(spec *Spec) (string, error) //这里返回的名字，会根据插件类型待会卷的特定信息。如csi驱动-->  csiDriverName^volumeName.  csiDriverName为注册的驱动名
 
 	// CanSupport tests whether the plugin supports a given volume
 	// specification from the API.  The spec pointer should be considered
@@ -239,7 +239,9 @@ type AttachableVolumePlugin interface {
 	DeviceMountableVolumePlugin
 	NewAttacher() (Attacher, error)
 	NewDetacher() (Detacher, error)
-	// CanAttach tests if provided volume spec is attachable
+	//CanAttach tests if provided volume spec is attachable
+	//Csi插件： 检测指定卷对应的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略/不支持Attach)
+	//如果CSIDriver列表中对应驱动不存在, 则能Attach.
 	CanAttach(spec *Spec) (bool, error)
 }
 
@@ -458,7 +460,7 @@ type VolumeHost interface {
 //kubelet内部的插件管理
 type VolumePluginMgr struct {
 	mutex                     sync.Mutex
-	plugins                   map[string]VolumePlugin //
+	plugins                   map[string]VolumePlugin //注册的卷插件：包括CSI等
 	prober                    DynamicPluginProber
 	probedPlugins             map[string]VolumePlugin
 	loggedDeprecationWarnings sets.String
@@ -468,6 +470,7 @@ type VolumePluginMgr struct {
 // Spec is an internal representation of a volume.  All API volume types translate to Spec.
 //卷的内部表示 卷要么来自PV,要么来自pod.spec.volumes[]
 //创建接口1：NewSpecFromPersistentVolume()
+//创建接口2：attach-detach controller的CreateVolumeSpec()
 type Spec struct {
 	Volume                          *v1.Volume           //在pod.spec.Volumes描述的卷
 	PersistentVolume                *v1.PersistentVolume //pv
@@ -594,6 +597,11 @@ func NewSpecFromPersistentVolume(pv *v1.PersistentVolume, readOnly bool) *Spec {
 // plugins.
 // 注意这个接口即被Kubelet调用，也被ControllerManager(AttachDetachController/ExpandController)调用
 // 为什么会有两处调用？
+// 这是因为在https://github.com/kubernetes/kubernetes/issues/20262中，新增了AttachDetachController,由controller-manager发起
+// volume与节点的attach/detach操作，不由kubelet进行attach/detach. 为了兼容，仍然保留kubelet的attach/detach功能.
+// 由kubelet的--enable-controller-attach-detach参数决定由谁进行卷的Attach操作（这里没有搞懂attach究竟是什么时候发生的？）。1.18默认由controller-manager
+// 进行attach/detach操作。即kubelet的--enable-controller-attach-detach默认为true.
+// 遍历所有管理的插件(CSI,local以及其他内置卷插件)，进行初始化
 func (pm *VolumePluginMgr) InitPlugins(plugins []VolumePlugin, prober DynamicPluginProber, host VolumeHost) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -896,14 +904,17 @@ func (pm *VolumePluginMgr) FindCreatablePluginBySpec(spec *Spec) (ProvisionableV
 // Unlike the other "FindPlugin" methods, this does not return error if no
 // plugin is found.  All volumes require a mounter and unmounter, but not
 // every volume will have an attacher/detacher.
+// 根据卷规格找到卷插件，检测卷的插件是否能够支持Attach/Detach操作。 如果能Attach, 返回插件；否则返回nil
 func (pm *VolumePluginMgr) FindAttachablePluginBySpec(spec *Spec) (AttachableVolumePlugin, error) {
 	//1. 从卷插件管理器中找到卷的对应的插件
 	volumePlugin, err := pm.FindPluginBySpec(spec)
 	if err != nil {
 		return nil, err
 	}
-	//如果卷插件需要卷挂载到Pod内部时，先要附加到节点上，检测卷能不能
+	//如果卷插件需要卷挂载到Pod内部时，先要附加到节点上，检测卷能不能attach
 	if attachableVolumePlugin, ok := volumePlugin.(AttachableVolumePlugin); ok {
+		//Csi插件： 检测指定卷对应的驱动是否需要跳过Attach步骤(如果对应的CSIDriver存在，且Spec.AttachRequired为true,则认为是忽略/不支持Attach)
+		//如果CSIDriver列表中对应驱动不存在, 则能Attach.
 		if canAttach, err := attachableVolumePlugin.CanAttach(spec); err != nil {
 			return nil, err
 		} else if canAttach {

@@ -119,7 +119,7 @@ func NewNestedPendingOperations(exponentialBackOffOnError bool) NestedPendingOpe
 }
 
 type nestedPendingOperations struct {
-	operations                []operation
+	operations                []operation //正在执行的操作????
 	exponentialBackOffOnError bool
 	cond                      *sync.Cond
 	lock                      sync.RWMutex
@@ -311,6 +311,7 @@ func (grm *nestedPendingOperations) Wait() {
 	}
 }
 
+//用来描述卷/pod/节点的操作
 type operationKey struct {
 	volumeName v1.UniqueVolumeName
 	podName    volumetypes.UniquePodName

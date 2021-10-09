@@ -64,6 +64,7 @@ type InTreeToCSITranslator interface {
 
 var _ OperationGenerator = &operationGenerator{}
 
+//操作生成器?
 type operationGenerator struct {
 	// Used to fetch objects from the API server like Node in the
 	// VerifyControllerAttachedVolume operation.
@@ -82,7 +83,7 @@ type operationGenerator struct {
 	checkNodeCapabilitiesBeforeMount bool
 
 	// blkUtil provides volume path related operations for block volume
-	blkUtil volumepathhandler.BlockVolumePathHandler
+	blkUtil volumepathhandler.BlockVolumePathHandler // 这里通过系统调用来执行挂载/卸载等块设备相关操作
 
 	translator InTreeToCSITranslator
 }
@@ -118,7 +119,9 @@ type OperationGenerator interface {
 	// Generates the DetachVolume function needed to perform the detach of a volume plugin
 	GenerateDetachVolumeFunc(volumeToDetach AttachedVolume, verifySafeToDetach bool, actualStateOfWorld ActualStateOfWorldAttacherUpdater) (volumetypes.GeneratedOperations, error)
 
-	// Generates the VolumesAreAttached function needed to verify if volume plugins are attached
+	// Generates the VolumesAreAttached function needed to verify if volume plugins are attache
+	//根据插件类型来建立插件-Attached卷的映射, 并生成返回一个函数：调用对应插件确认卷是否实际仍然Attached, 如果不再Attached，则更新Attached卷表。
+	// CSI插件是根据卷对应的VolumeAttachment对象存在来确认卷是否仍然Attache
 	GenerateVolumesAreAttachedFunc(attachedVolumes []AttachedVolume, nodeName types.NodeName, actualStateOfWorld ActualStateOfWorldAttacherUpdater) (volumetypes.GeneratedOperations, error)
 
 	// Generates the UnMountDevice function needed to perform the unmount of a device
@@ -153,18 +156,23 @@ type OperationGenerator interface {
 	GenerateExpandInUseVolumeFunc(volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater) (volumetypes.GeneratedOperations, error)
 }
 
+//根据插件类型来建立插件-Attached卷的映射, 并生成返回一个函数：调用对应插件确认卷是否实际仍然Attached, 如果不再Attached，则更新Attached卷表。
+// CSI插件是根据卷对应的VolumeAttachment对象存在来确认卷是否仍然Attached
 func (og *operationGenerator) GenerateVolumesAreAttachedFunc(
 	attachedVolumes []AttachedVolume,
 	nodeName types.NodeName,
 	actualStateOfWorld ActualStateOfWorldAttacherUpdater) (volumetypes.GeneratedOperations, error) {
 	// volumesPerPlugin maps from a volume plugin to a list of volume specs which belong
 	// to this type of plugin
+	//分别记录每个插件对应的Attached卷的规格。 key是插件名
 	volumesPerPlugin := make(map[string][]*volume.Spec)
 	// volumeSpecMap maps from a volume spec to its unique volumeName which will be used
 	// when calling MarkVolumeAsDetached
+	//根据卷规格记录对应的唯一卷识别符（插件/驱动/卷名）
 	volumeSpecMap := make(map[*volume.Spec]v1.UniqueVolumeName)
 
 	// Iterate each volume spec and put them into a map index by the pluginName
+	//建立插件和卷规格的映射表，以及卷规格和卷唯一识别符的映射表
 	for _, volumeAttached := range attachedVolumes {
 		if volumeAttached.VolumeSpec == nil {
 			klog.Errorf("VerifyVolumesAreAttached.GenerateVolumesAreAttachedFunc: nil spec for volume %s", volumeAttached.VolumeName)
@@ -190,7 +198,9 @@ func (og *operationGenerator) GenerateVolumesAreAttachedFunc(
 
 		// For each volume plugin, pass the list of volume specs to VolumesAreAttached to check
 		// whether the volumes are still attached.
+		//遍历插件和卷规格的映射表
 		for pluginName, volumesSpecs := range volumesPerPlugin {
+			//找到对应的支持Attach的插件
 			attachableVolumePlugin, err :=
 				og.volumePluginMgr.FindAttachablePluginByName(pluginName)
 			if err != nil || attachableVolumePlugin == nil {
@@ -209,7 +219,7 @@ func (og *operationGenerator) GenerateVolumesAreAttachedFunc(
 					newAttacherErr)
 				continue
 			}
-
+			//确认插件里面的卷的Attached的情况。CSI卷： 根据对应的VolumeAttachment来判断是否Attached
 			attached, areAttachedErr := volumeAttacher.VolumesAreAttached(volumesSpecs, nodeName)
 			if areAttachedErr != nil {
 				klog.Errorf(
@@ -218,8 +228,9 @@ func (og *operationGenerator) GenerateVolumesAreAttachedFunc(
 					areAttachedErr)
 				continue
 			}
-
+			//根据卷的Attached情况，更新实际Attached表
 			for spec, check := range attached {
+				//如果卷没有Attach到指定节点上，将卷从实际attached表移除卷和节点的关系
 				if !check {
 					actualStateOfWorld.MarkVolumeAsDetached(volumeSpecMap[spec], nodeName)
 					klog.V(1).Infof("VerifyVolumesAreAttached determined volume %q (spec.Name: %q) is no longer attached to node %q, therefore it was marked as detached.",
@@ -316,23 +327,27 @@ func (og *operationGenerator) GenerateBulkVolumeVerifyFunc(
 
 }
 
+//生成卷Attach/Detach函数
 func (og *operationGenerator) GenerateAttachVolumeFunc(
 	volumeToAttach VolumeToAttach,
 	actualStateOfWorld ActualStateOfWorldAttacherUpdater) volumetypes.GeneratedOperations {
 
 	attachVolumeFunc := func() (error, error) {
+		// 根据卷规格找到卷插件，检测卷的插件是否能够支持Attach/Detach操作。 如果能Attach, 返回插件；否则返回nil
 		attachableVolumePlugin, err :=
 			og.volumePluginMgr.FindAttachablePluginBySpec(volumeToAttach.VolumeSpec)
 		if err != nil || attachableVolumePlugin == nil {
 			return volumeToAttach.GenerateError("AttachVolume.FindAttachablePluginBySpec failed", err)
 		}
-
+		//插件的Attacher
 		volumeAttacher, newAttacherErr := attachableVolumePlugin.NewAttacher()
 		if newAttacherErr != nil {
 			return volumeToAttach.GenerateError("AttachVolume.NewAttacher failed", newAttacherErr)
 		}
 
 		// Execute attach
+		//不同插件有不同行为，如果是CSI插件则生成VolumeAttachment对象，记录对应的节点和PV名，然后监视VolumeAttachment的变化，直到VolumeAttachment.Status满足VolumeAttachment.Status.Attached为true或者超时
+		//CSIPlugin返回的devicePath为空
 		devicePath, attachErr := volumeAttacher.Attach(
 			volumeToAttach.VolumeSpec, volumeToAttach.NodeName)
 
@@ -341,6 +356,7 @@ func (og *operationGenerator) GenerateAttachVolumeFunc(
 			if derr, ok := attachErr.(*volerr.DanglingAttachError); ok {
 				uncertainNode = derr.CurrentNode
 			}
+			// 添加卷到Attached表，并记录与节点的Attached关系。但不确认是否真的的Attached
 			addErr := actualStateOfWorld.MarkVolumeAsUncertain(
 				v1.UniqueVolumeName(""),
 				volumeToAttach.VolumeSpec,
@@ -408,6 +424,7 @@ func (og *operationGenerator) GetCSITranslator() InTreeToCSITranslator {
 	return og.translator
 }
 
+//生成DetachVolume方法
 func (og *operationGenerator) GenerateDetachVolumeFunc(
 	volumeToDetach AttachedVolume,
 	verifySafeToDetach bool,
@@ -416,7 +433,7 @@ func (og *operationGenerator) GenerateDetachVolumeFunc(
 	var attachableVolumePlugin volume.AttachableVolumePlugin
 	var pluginName string
 	var err error
-
+	//根据唯一卷名或者卷规格找到卷对应的插件和卷名
 	if volumeToDetach.VolumeSpec != nil {
 		attachableVolumePlugin, err =
 			og.volumePluginMgr.FindAttachablePluginBySpec(volumeToDetach.VolumeSpec)
@@ -444,11 +461,12 @@ func (og *operationGenerator) GenerateDetachVolumeFunc(
 		}
 
 	}
-
+	// 获取插件名
 	if pluginName == "" {
 		pluginName = attachableVolumePlugin.GetPluginName()
 	}
-
+	//创建一个卷Detacher，Detacher对象行为取决于具体的插件。
+	// CSIVolume的Detach行为删除对应的VolumeAttachment对象
 	volumeDetacher, err := attachableVolumePlugin.NewDetacher()
 	if err != nil {
 		return volumetypes.GeneratedOperations{}, volumeToDetach.GenerateErrorDetailed("DetachVolume.NewDetacher failed", err)

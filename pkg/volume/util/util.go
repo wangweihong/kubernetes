@@ -54,10 +54,12 @@ const (
 	// ControllerManagedAttachAnnotation is the key of the annotation on Node
 	// objects that indicates attach/detach operations for the node should be
 	// managed by the attach/detach controller
+	//当kubelet启动时设置了 enable-controller-attach-detach 参数时节点会设置该annotation.
 	ControllerManagedAttachAnnotation string = "volumes.kubernetes.io/controller-managed-attach-detach"
 
 	// KeepTerminatedPodVolumesAnnotation is the key of the annotation on Node
 	// that decides if pod volumes are unmounted when pod is terminated
+	//档kubelet设置了volumes.kubernetes.io/keep-terminated-pod-volumes时，会设置这个标志。调试用
 	KeepTerminatedPodVolumesAnnotation string = "volumes.kubernetes.io/keep-terminated-pod-volumes"
 
 	// MountsInGlobalPDPath is name of the directory appended to a volume plugin
@@ -76,6 +78,7 @@ const (
 // IsReady checks for the existence of a regular file
 // called 'ready' in the given directory and returns
 // true if that file exists.
+//通过检测指定目录下是否有一个ready命名的普通文件来确认就绪
 func IsReady(dir string) bool {
 	readyFile := filepath.Join(dir, readyFileName)
 	s, err := os.Stat(readyFile)
@@ -334,6 +337,7 @@ func GetUniquePodName(pod *v1.Pod) types.UniquePodName {
 // The returned name can be used to uniquely reference the volume, for example,
 // to prevent operations (attach/detach or mount/unmount) from being triggered
 // on the same volume.
+//生成卷为唯一名，注意这里volumeName不是插件名/卷名， 取决于实际的插件。如csi插件-->  csiDriverName^volumeName.  csiDriverName为注册的驱动名
 func GetUniqueVolumeName(pluginName, volumeName string) v1.UniqueVolumeName {
 	return v1.UniqueVolumeName(fmt.Sprintf("%s/%s", pluginName, volumeName))
 }
@@ -352,6 +356,7 @@ func GetUniqueVolumeNameFromSpecWithPod(
 // This returned name can be used to uniquely reference the actual backing
 // device, directory, path, etc. referenced by the given volumeSpec.
 // If the given plugin does not support the volume spec, this returns an error.
+//基于卷的插件/注册驱动类型/卷名生成唯一卷名.
 func GetUniqueVolumeNameFromSpec(
 	volumePlugin volume.VolumePlugin,
 	volumeSpec *volume.Spec) (v1.UniqueVolumeName, error) {
@@ -360,7 +365,7 @@ func GetUniqueVolumeNameFromSpec(
 			"volumePlugin should not be nil. volumeSpec.Name=%q",
 			volumeSpec.Name())
 	}
-
+	// 这里volumeName不是插件名/卷名， 取决于实际的插件。如csi插件-->  csiDriverName^volumeName.  csiDriverName为注册的驱动名
 	volumeName, err := volumePlugin.GetVolumeName(volumeSpec)
 	if err != nil || volumeName == "" {
 		return "", fmt.Errorf(
@@ -401,6 +406,7 @@ func notRunning(statuses []v1.ContainerStatus) bool {
 // plugin_namespace/plugin/volume_name, see k8s.io/kubernetes/pkg/volume/plugins.go VolumePlugin interface
 // description and pkg/volume/util/volumehelper/volumehelper.go GetUniqueVolumeNameFromSpec that constructs
 // the unique volume names.
+//将 插件/驱动/卷等构建的卷唯一识别符拆分成对应的插件/卷名
 func SplitUniqueName(uniqueName v1.UniqueVolumeName) (string, string, error) {
 	components := strings.SplitN(string(uniqueName), "/", 3)
 	if len(components) != 3 {
@@ -654,6 +660,7 @@ func WriteVolumeCache(deviceMountPath string, exec utilexec.Interface) error {
 // false, it is not guaranteed that multi-attach is actually supported by the volume type and we must rely on the
 // attacher to fail fast in such cases.
 // Please see https://github.com/kubernetes/kubernetes/issues/40669 and https://github.com/kubernetes/kubernetes/pull/40148#discussion_r98055047
+// 检测卷是否支持Attached到多个节点。PV根据AccessMode来判断
 func IsMultiAttachAllowed(volumeSpec *volume.Spec) bool {
 	if volumeSpec == nil {
 		// we don't know if it's supported or not and let the attacher fail later in cases it's not supported

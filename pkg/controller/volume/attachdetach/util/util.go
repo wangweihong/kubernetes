@@ -174,6 +174,7 @@ func DetermineVolumeAction(pod *v1.Pod, desiredStateOfWorld cache.DesiredStateOf
 		return defaultAction
 	}
 	nodeName := types.NodeName(pod.Spec.NodeName)
+	//调试用
 	keepTerminatedPodVolume := desiredStateOfWorld.GetKeepTerminatedPodVolumesForNode(nodeName)
 
 	if util.IsPodTerminated(pod, pod.Status) {
@@ -186,18 +187,21 @@ func DetermineVolumeAction(pod *v1.Pod, desiredStateOfWorld cache.DesiredStateOf
 
 // ProcessPodVolumes processes the volumes in the given pod and adds them to the
 // desired state of the world if addVolumes is true, otherwise it removes them.
+//如果pod已经调度且调度的节点由attach-detach contrller负责attach/detach操作，而且pod引用的卷支持Attach操作
+// 则根据addVolumes标志来决定是添加还是删除期待Attach表中pod的信息
+// 监听到1）已经调度Pod创建/更新/删除，2）已经Bound的PVC创建/更新时会调用
 func ProcessPodVolumes(pod *v1.Pod, addVolumes bool, desiredStateOfWorld cache.DesiredStateOfWorld, volumePluginMgr *volume.VolumePluginMgr, pvcLister corelisters.PersistentVolumeClaimLister, pvLister corelisters.PersistentVolumeLister, csiMigratedPluginManager csimigration.PluginManager, csiTranslator csimigration.InTreeToCSITranslator) {
 	if pod == nil {
 		return
 	}
-
+	//pod没有卷
 	if len(pod.Spec.Volumes) <= 0 {
 		klog.V(10).Infof("Skipping processing of pod %q/%q: it has no volumes.",
 			pod.Namespace,
 			pod.Name)
 		return
 	}
-
+	// pod没有调度
 	nodeName := types.NodeName(pod.Spec.NodeName)
 	if nodeName == "" {
 		klog.V(10).Infof(
@@ -205,6 +209,7 @@ func ProcessPodVolumes(pod *v1.Pod, addVolumes bool, desiredStateOfWorld cache.D
 			pod.Namespace,
 			pod.Name)
 		return
+		//节点不由attach-detach controller负责Attach(kubelet设置了--enable-controller-attach-detach为false时,由kubelet负责attach/detach.)
 	} else if !desiredStateOfWorld.NodeExists(nodeName) {
 		// If the node the pod is scheduled to does not exist in the desired
 		// state of the world data structure, that indicates the node is not
@@ -229,7 +234,7 @@ func ProcessPodVolumes(pod *v1.Pod, addVolumes bool, desiredStateOfWorld cache.D
 				err)
 			continue
 		}
-
+		// 根据卷规格找到卷插件，检测卷的插件是否能够支持Attach/Detach操作。 如果能Attach, 返回插件；否则返回nil
 		attachableVolumePlugin, err :=
 			volumePluginMgr.FindAttachablePluginBySpec(volumeSpec)
 		if err != nil || attachableVolumePlugin == nil {
@@ -243,6 +248,7 @@ func ProcessPodVolumes(pod *v1.Pod, addVolumes bool, desiredStateOfWorld cache.D
 		}
 
 		uniquePodName := util.GetUniquePodName(pod)
+		//添加卷到desiredStateOfWorld表中。 pod创建/更新时执行
 		if addVolumes {
 			// Add volume to desired state of world
 			_, err := desiredStateOfWorld.AddPod(
@@ -255,7 +261,7 @@ func ProcessPodVolumes(pod *v1.Pod, addVolumes bool, desiredStateOfWorld cache.D
 					pod.Name,
 					err)
 			}
-
+			//从desiredStateOfWorld移除pod的Attach信息. pod删除时执行
 		} else {
 			// Remove volume from desired state of world
 			uniqueVolumeName, err := util.GetUniqueVolumeNameFromSpec(
