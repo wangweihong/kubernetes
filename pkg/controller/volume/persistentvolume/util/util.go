@@ -39,6 +39,8 @@ const (
 	// of the PVC has passed through the initial setup. This information changes how
 	// we interpret some observations of the state of the objects. Value of this
 	// Annotation does not matter.
+	//当pvc第一次绑定完成会设置这个annotation。如果pvc带有这个annotation但spec.volumeName为空, 则认为
+	//数据丢失. 设置为LOST状态
 	AnnBindCompleted = "pv.kubernetes.io/bind-completed"
 
 	// AnnBoundByController annotation applies to PVs and PVCs. It indicates that
@@ -51,8 +53,8 @@ const (
 
 	// AnnSelectedNode annotation is added to a PVC that has been triggered by scheduler to
 	// be dynamically provisioned. Its value is the name of the selected node.
-	AnnSelectedNode = "volume.kubernetes.io/selected-node"
-
+	AnnSelectedNode = "volume.kubernetes.io/selected-node" //用来在pvc指定了要绑定的pv落地的节点
+	// pod调度时会根据这个字段来判断节点是否满足pvc落地
 	// NotSupportedProvisioner is a special provisioner name which can be set
 	// in storage class to indicate dynamic provisioning is not supported by
 	// the storage.
@@ -87,7 +89,9 @@ func IsDelayBindingProvisioning(claim *v1.PersistentVolumeClaim) bool {
 	return ok
 }
 
-// IsDelayBindingMode checks if claim is in delay binding mode.
+// IsDelayBindingMode checks if claim is in delay binding mode
+// 延迟绑定模式，创建pvc并不会立即创建pv, 而是要等到pvc被pod使用
+// 通过pvc引用的存储类的VolumeBindingMode来判断
 func IsDelayBindingMode(claim *v1.PersistentVolumeClaim, classLister storagelisters.StorageClassLister) (bool, error) {
 	className := v1helper.GetPersistentVolumeClaimClass(claim)
 	if className == "" {
@@ -112,11 +116,14 @@ func IsDelayBindingMode(claim *v1.PersistentVolumeClaim, classLister storagelist
 // GetBindVolumeToClaim returns a new volume which is bound to given claim. In
 // addition, it returns a bool which indicates whether we made modification on
 // original volume.
+//bool表示volume是否添加了PVC的引用
+// 如果claim和volume没有绑定, 用claim来更新pv.spec.claimRef
 func GetBindVolumeToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolumeClaim) (*v1.PersistentVolume, bool, error) {
 	dirty := false
 
 	// Check if the volume was already bound (either by user or by controller)
 	shouldSetBoundByController := false
+	//volume是否绑定到PVC claim上
 	if !IsVolumeBoundToClaim(volume, claim) {
 		shouldSetBoundByController = true
 	}
@@ -126,6 +133,7 @@ func GetBindVolumeToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolum
 	volumeClone := volume.DeepCopy()
 
 	// Bind the volume to the claim if it is not bound yet
+	//如果没有绑定或者之前绑定的不是pvc claim, 将claim的信息更新到PV.spec.ClaimRef中
 	if volume.Spec.ClaimRef == nil ||
 		volume.Spec.ClaimRef.Name != claim.Name ||
 		volume.Spec.ClaimRef.Namespace != claim.Namespace ||
@@ -151,6 +159,7 @@ func GetBindVolumeToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolum
 // IsVolumeBoundToClaim returns true, if given volume is pre-bound or bound
 // to specific claim. Both claim.Name and claim.Namespace must be equal.
 // If claim.UID is present in volume.Spec.ClaimRef, it must be equal too.
+//PV volume是否和PVC claim绑定
 func IsVolumeBoundToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolumeClaim) bool {
 	if volume.Spec.ClaimRef == nil {
 		return false
@@ -178,6 +187,10 @@ func IsVolumeBoundToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolum
 // excludedVolumes is only used in the scheduler path, and is needed for evaluating multiple
 // unbound PVCs for a single Pod at one time.  As each PVC finds a matching PV, the chosen
 // PV needs to be excluded from future matching.
+//从volumes中找到最适合和claim绑定的卷
+// 这个函数有两个目标用户: pv controller和scheduler.
+//	* pv controller不关心pvc的落地情况，只为完成pvc/pv的绑定，此时并没有pod的参与，所以node为空
+//  * scheduler要为延迟绑定模式的pvc查找既满足pvc绑定，又满足调度节点的pv(有些pv指定了落地的节点条件），需要比对pv拓扑和node
 func FindMatchingVolume(
 	claim *v1.PersistentVolumeClaim,
 	volumes []*v1.PersistentVolume,
@@ -187,10 +200,13 @@ func FindMatchingVolume(
 
 	var smallestVolume *v1.PersistentVolume
 	var smallestVolumeQty resource.Quantity
+	//pvc请求的存储容量
 	requestedQty := claim.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
+	//pvc请求的存储类
 	requestedClass := v1helper.GetPersistentVolumeClaimClass(claim)
 
 	var selector labels.Selector
+	//pvc指定的标签选择器
 	if claim.Spec.Selector != nil {
 		internalSelector, err := metav1.LabelSelectorAsSelector(claim.Spec.Selector)
 		if err != nil {
@@ -211,26 +227,29 @@ func FindMatchingVolume(
 			// Skip volumes in the excluded list
 			continue
 		}
+		//pv已经和其他pvc绑定
 		if volume.Spec.ClaimRef != nil && !IsVolumeBoundToClaim(volume, claim) {
 			continue
 		}
-
+		//PV容量是否满足
 		volumeQty := volume.Spec.Capacity[v1.ResourceStorage]
 		if volumeQty.Cmp(requestedQty) < 0 {
 			continue
 		}
 		// filter out mismatching volumeModes
+		//卷模式是否匹配
 		if CheckVolumeModeMismatches(&claim.Spec, &volume.Spec) {
 			continue
 		}
 
 		// check if PV's DeletionTimeStamp is set, if so, skip this volume.
+		//PV正在删除
 		if utilfeature.DefaultFeatureGate.Enabled(features.StorageObjectInUseProtection) {
 			if volume.ObjectMeta.DeletionTimestamp != nil {
 				continue
 			}
 		}
-
+		//PV是否满足节点亲和力
 		nodeAffinityValid := true
 		if node != nil {
 			// Scheduler path, check that the PV NodeAffinity
@@ -242,7 +261,7 @@ func FindMatchingVolume(
 				nodeAffinityValid = false
 			}
 		}
-
+		// pvc/pv是否相互绑定
 		if IsVolumeBoundToClaim(volume, claim) {
 			// If PV node affinity is invalid, return no match.
 			// This means the prebound PV (and therefore PVC)
@@ -253,7 +272,7 @@ func FindMatchingVolume(
 
 			return volume, nil
 		}
-
+		//没有指定节点而且设置了延迟调度模式
 		if node == nil && delayBinding {
 			// PV controller does not bind this claim.
 			// Scheduler will handle binding unbound volumes
@@ -275,6 +294,7 @@ func FindMatchingVolume(
 		} else if selector != nil && !selector.Matches(labels.Set(volume.Labels)) {
 			continue
 		}
+		//提取PV的storageclass
 		if v1helper.GetPersistentVolumeClass(volume) != requestedClass {
 			continue
 		}
@@ -285,11 +305,12 @@ func FindMatchingVolume(
 		if node != nil {
 			// Scheduler path
 			// Check that the access modes match
+			//检测pv支持的访问模式是否满足pvc的访问模式
 			if !CheckAccessModes(claim, volume) {
 				continue
 			}
 		}
-
+		// 找到满足容量的最小卷
 		if smallestVolume == nil || smallestVolumeQty.Cmp(volumeQty) > 0 {
 			smallestVolume = volume
 			smallestVolumeQty = volumeQty
@@ -306,6 +327,7 @@ func FindMatchingVolume(
 
 // CheckVolumeModeMismatches is a convenience method that checks volumeMode for PersistentVolume
 // and PersistentVolumeClaims
+//检测pv的卷模式是否满足pvc的卷模式
 func CheckVolumeModeMismatches(pvcSpec *v1.PersistentVolumeClaimSpec, pvSpec *v1.PersistentVolumeSpec) bool {
 	// In HA upgrades, we cannot guarantee that the apiserver is on a version >= controller-manager.
 	// So we default a nil volumeMode to filesystem
@@ -321,6 +343,7 @@ func CheckVolumeModeMismatches(pvcSpec *v1.PersistentVolumeClaimSpec, pvSpec *v1
 }
 
 // CheckAccessModes returns true if PV satisfies all the PVC's requested AccessModes
+//检测pv支持的访问模式是否满足pvc的访问模式
 func CheckAccessModes(claim *v1.PersistentVolumeClaim, volume *v1.PersistentVolume) bool {
 	pvModesMap := map[v1.PersistentVolumeAccessMode]bool{}
 	for _, mode := range volume.Spec.AccessModes {

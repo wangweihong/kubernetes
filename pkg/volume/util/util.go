@@ -166,10 +166,12 @@ func GetClassForVolume(kubeClient clientset.Interface, pv *v1.PersistentVolume) 
 
 // CheckNodeAffinity looks at the PV node affinity, and checks if the node has the same corresponding labels
 // This ensures that we don't mount a volume that doesn't belong to this node
+//判断节点表标签是否满足pv的节点亲和力
 func CheckNodeAffinity(pv *v1.PersistentVolume, nodeLabels map[string]string) error {
 	return checkVolumeNodeAffinity(pv, nodeLabels)
 }
 
+//判断节点表标签是否满足pv的节点亲和力
 func checkVolumeNodeAffinity(pv *v1.PersistentVolume, nodeLabels map[string]string) error {
 	if pv.Spec.NodeAffinity == nil {
 		return nil
@@ -307,6 +309,7 @@ func AccessModesContains(modes []v1.PersistentVolumeAccessMode, mode v1.Persiste
 }
 
 // AccessModesContainedInAll returns whether all of the requested modes are contained by modes
+//indexedModes是否包含所有requestedMode
 func AccessModesContainedInAll(indexedModes []v1.PersistentVolumeAccessMode, requestedModes []v1.PersistentVolumeAccessMode) bool {
 	for _, mode := range requestedModes {
 		if !AccessModesContains(indexedModes, mode) {

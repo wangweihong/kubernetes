@@ -37,10 +37,12 @@ type PodBindingCache interface {
 	// GetBindings will return the cached bindings for the given pod and node.
 	// A nil return value means that the entry was not found. An empty slice
 	// means that no binding operations are needed.
+	// pod引用的pv在node上可以绑定的已存在pv
 	GetBindings(pod *v1.Pod, node string) []*bindingInfo
 
 	// A nil return value means that the entry was not found. An empty slice
 	// means that no provisioning operations are needed.
+	//pod引用的没有合适的需要动态分配的pvc
 	GetProvisionedPVCs(pod *v1.Pod, node string) []*v1.PersistentVolumeClaim
 
 	// GetDecisions will return all cached decisions for the given pod.
@@ -51,6 +53,11 @@ type PodBindingCache interface {
 	DeleteBindings(pod *v1.Pod)
 }
 
+//用来保存pod在不同节点上调度时pod引用的pvc和pv的绑定关系
+//1. 用来决议节点能不能让pod的所有pvc绑定pv落地到节点上
+// 以下情况都会影响决议
+// 	* pvc指定了要绑定的pv的落地节点
+//  * pv指定了落地的节点拓扑
 type podBindingCache struct {
 	// synchronizes bindingDecisions
 	rwMutex sync.RWMutex
@@ -65,9 +72,10 @@ type podBindingCache struct {
 type nodeDecisions map[string]nodeDecision
 
 // A decision includes bindingInfo and provisioned PVCs of the node
+//用来描述如果pod运行到node上，pod的pvc和pv的相关绑定绑定信息
 type nodeDecision struct {
-	bindings      []*bindingInfo
-	provisionings []*v1.PersistentVolumeClaim
+	bindings      []*bindingInfo              //pod引用的pvc能够在节点上找到的匹配的已存在的pv的绑定关系
+	provisionings []*v1.PersistentVolumeClaim //无法在已存在的pv找到匹配，需要动态分配的pvc。
 }
 
 // NewPodBindingCache creates a pod binding cache.
@@ -122,6 +130,7 @@ func (c *podBindingCache) UpdateBindings(pod *v1.Pod, node string, bindings []*b
 	decisions[node] = decision
 }
 
+// pod引用的pv在node上可以绑定的已存在pv
 func (c *podBindingCache) GetBindings(pod *v1.Pod, node string) []*bindingInfo {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
@@ -138,6 +147,7 @@ func (c *podBindingCache) GetBindings(pod *v1.Pod, node string) []*bindingInfo {
 	return decision.bindings
 }
 
+//pod引用的没有合适的需要动态分配的pvc
 func (c *podBindingCache) GetProvisionedPVCs(pod *v1.Pod, node string) []*v1.PersistentVolumeClaim {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
@@ -154,6 +164,7 @@ func (c *podBindingCache) GetProvisionedPVCs(pod *v1.Pod, node string) []*v1.Per
 	return decision.provisionings
 }
 
+//删除pod和node的决议(pod引用的pvc绑定，或者)
 func (c *podBindingCache) ClearBindings(pod *v1.Pod, node string) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()

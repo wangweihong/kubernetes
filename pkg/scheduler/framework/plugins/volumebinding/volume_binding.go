@@ -71,7 +71,7 @@ func (pl *VolumeBinding) Filter(ctx context.Context, cs *framework.CycleState, p
 	if !podHasPVCs(pod) {
 		return nil
 	}
-
+	//根据pod引用的pvc和pv的绑定关系, 检测pod是否能够落地到node上
 	reasons, err := pl.binder.FindPodVolumes(pod, node)
 
 	if err != nil {

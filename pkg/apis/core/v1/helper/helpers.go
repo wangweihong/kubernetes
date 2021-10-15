@@ -504,6 +504,7 @@ func GetAvoidPodsFromNodeAnnotations(annotations map[string]string) (v1.AvoidPod
 }
 
 // GetPersistentVolumeClass returns StorageClassName.
+//提取PV的storageclass
 func GetPersistentVolumeClass(volume *v1.PersistentVolume) string {
 	// Use beta annotation first
 	if class, found := volume.Annotations[v1.BetaStorageClassAnnotation]; found {
@@ -515,6 +516,7 @@ func GetPersistentVolumeClass(volume *v1.PersistentVolume) string {
 
 // GetPersistentVolumeClaimClass returns StorageClassName. If no storage class was
 // requested, it returns "".
+//pvc的StorageClass
 func GetPersistentVolumeClaimClass(claim *v1.PersistentVolumeClaim) string {
 	// Use beta annotation first
 	if class, found := claim.Annotations[v1.BetaStorageClassAnnotation]; found {

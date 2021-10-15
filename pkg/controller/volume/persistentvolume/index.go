@@ -33,6 +33,7 @@ type persistentVolumeOrderedIndex struct {
 	store cache.Indexer
 }
 
+//建立pv的访问模式索引, 索引为pv的访问模式转换转换成字符串，如[ReadWriteOnce,ReadOnlyMany]--> RWO,ROX
 func newPersistentVolumeOrderedIndex() persistentVolumeOrderedIndex {
 	return persistentVolumeOrderedIndex{cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"accessmodes": accessModesIndexFunc})}
 }
@@ -49,13 +50,14 @@ func accessModesIndexFunc(obj interface{}) ([]string, error) {
 
 // listByAccessModes returns all volumes with the given set of
 // AccessModeTypes. The list is unsorted!
+//找到支持指定访问模式的PV列表
 func (pvIndex *persistentVolumeOrderedIndex) listByAccessModes(modes []v1.PersistentVolumeAccessMode) ([]*v1.PersistentVolume, error) {
 	pv := &v1.PersistentVolume{
 		Spec: v1.PersistentVolumeSpec{
 			AccessModes: modes,
 		},
 	}
-
+	//如pv的访问模式为[ReadWriteOnce,ReadOnlyMany]，索引key就为RWO,ROX
 	objs, err := pvIndex.store.Index("accessmodes", pv)
 	if err != nil {
 		return nil, err
@@ -70,6 +72,7 @@ func (pvIndex *persistentVolumeOrderedIndex) listByAccessModes(modes []v1.Persis
 }
 
 // find returns the nearest PV from the ordered list or nil if a match is not found
+//从volumes中找到最适合和claim绑定的卷, 如果指定了延迟绑定模式（延迟绑定一定要Pod参与)，就哪个都不找。
 func (pvIndex *persistentVolumeOrderedIndex) findByClaim(claim *v1.PersistentVolumeClaim, delayBinding bool) (*v1.PersistentVolume, error) {
 	// PVs are indexed by their access modes to allow easier searching.  Each
 	// index is the string representation of a set of access modes. There is a
@@ -84,19 +87,21 @@ func (pvIndex *persistentVolumeOrderedIndex) findByClaim(claim *v1.PersistentVol
 	// Searches are performed against a set of access modes, so we can attempt
 	// not only the exact matching modes but also potential matches (the GCEPD
 	// example above).
+	//如pv1支持[rwm,rom,rwo], pv2支持[rom,rwo], pv3支持[rom] 而请求requests为rwo,就返回pv1,pv2的accessMode
 	allPossibleModes := pvIndex.allPossibleMatchingAccessModes(claim.Spec.AccessModes)
 
 	for _, modes := range allPossibleModes {
+		//找到所有符合访问模式的PV
 		volumes, err := pvIndex.listByAccessModes(modes)
 		if err != nil {
 			return nil, err
 		}
-
+		//从volumes中找到最适合和claim绑定的卷
 		bestVol, err := pvutil.FindMatchingVolume(claim, volumes, nil /* node for topology binding*/, nil /* exclusion map */, delayBinding)
 		if err != nil {
 			return nil, err
 		}
-
+		//找到了可以绑定的pv
 		if bestVol != nil {
 			return bestVol, nil
 		}
@@ -147,11 +152,14 @@ func (pvIndex *persistentVolumeOrderedIndex) findBestMatchForClaim(claim *v1.Per
 //
 // This func returns modes with ascending levels of modes to give the user
 // what is closest to what they actually asked for.
+//如pv1支持[rwm,rom,rwo], pv2支持[rom,rwo], pv3支持[rom] 而请求requests为rwo,就返回pv1,pv2的accessMode
 func (pvIndex *persistentVolumeOrderedIndex) allPossibleMatchingAccessModes(requestedModes []v1.PersistentVolumeAccessMode) [][]v1.PersistentVolumeAccessMode {
 	matchedModes := [][]v1.PersistentVolumeAccessMode{}
+	//找到pv所有支持的访问模式索引
 	keys := pvIndex.store.ListIndexFuncValues("accessmodes")
 	for _, key := range keys {
 		indexedModes := v1helper.GetAccessModesFromString(key)
+		////indexedModes是否包含所有requestedMode
 		if volumeutil.AccessModesContainedInAll(indexedModes, requestedModes) {
 			matchedModes = append(matchedModes, indexedModes)
 		}

@@ -34,16 +34,16 @@ import (
 // Kubernetes API objects that implement meta.Interface
 type AssumeCache interface {
 	// Assume updates the object in-memory only
-	Assume(obj interface{}) error
+	Assume(obj interface{}) error //如果obj版本比缓存中的对象最新版本要新，则替换到缓存中对象最新版本
 
 	// Restore the informer cache's version of the object
-	Restore(objName string)
+	Restore(objName string) //用informer watch的对象版本替换为最新版本
 
 	// Get the object by name
-	Get(objName string) (interface{}, error)
+	Get(objName string) (interface{}, error) //获得对象的最新版本
 
 	// Get the API object by name
-	GetAPIObj(objName string) (interface{}, error)
+	GetAPIObj(objName string) (interface{}, error) //获得对象通过informer watch得到的版本
 
 	// List all the objects in the cache
 	List(indexObj interface{}) []interface{}
@@ -93,22 +93,26 @@ type assumeCache struct {
 	description string
 
 	// Stores objInfo pointers
-	store cache.Indexer
+	store cache.Indexer // 本地缓存
 
 	// Index function for object
-	indexFunc cache.IndexFunc
-	indexName string
+	indexFunc cache.IndexFunc //索引器函数
+	indexName string          // 索引查找函数
 }
 
+//assumeCache缓存对象
 type objInfo struct {
 	// name of the object
 	name string
 
 	// Latest version of object could be cached-only or from informer
-	latestObj interface{}
+	latestObj interface{} //缓存中的最新版本
+	// 1. 当informer监听到事件, 如果版本比当前新，则替换(此时和apiObj一样)
+	// 2. 当有接口调用Assume()通过参数传递新版本，将会替换（将会和apiObj不一样)
+	// 3. 当有接口调用Restore(), 则用apiObj来替换(将会和apiObj一样)
 
 	// Latest object from informer
-	apiObj interface{}
+	apiObj interface{} // informer通过watch获得资源的最新版本.(一般和latestObj是同一个对象, 除非调用Assume())
 }
 
 func objInfoKeyFunc(obj interface{}) (string, error) {
@@ -128,6 +132,7 @@ func (c *assumeCache) objInfoIndexFunc(obj interface{}) ([]string, error) {
 }
 
 // NewAssumeCache creates an assume cache for general objects.
+// 创建带索引器的缓存, 监听缓存对象的事件，同步到缓存中
 func NewAssumeCache(informer cache.SharedIndexInformer, description, indexName string, indexFunc cache.IndexFunc) AssumeCache {
 	c := &assumeCache{
 		description: description,
@@ -149,6 +154,7 @@ func NewAssumeCache(informer cache.SharedIndexInformer, description, indexName s
 	return c
 }
 
+//如果obj的版本比缓存要新, 则替换缓存的数据。(informer watch到资源创建触发)
 func (c *assumeCache) add(obj interface{}) {
 	if obj == nil {
 		return
@@ -162,7 +168,7 @@ func (c *assumeCache) add(obj interface{}) {
 
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
-
+	//比较缓存对象最新新版本和obj的版本如果obj版本, 如果obj的版本较久则直接返回
 	if objInfo, _ := c.getObjInfo(name); objInfo != nil {
 		newVersion, err := c.getObjVersion(name, obj)
 		if err != nil {
@@ -183,7 +189,7 @@ func (c *assumeCache) add(obj interface{}) {
 			return
 		}
 	}
-
+	//替换缓存的对象为obj
 	objInfo := &objInfo{name: name, latestObj: obj, apiObj: obj}
 	if err = c.store.Update(objInfo); err != nil {
 		klog.Warningf("got error when updating stored object : %v", err)
@@ -192,10 +198,12 @@ func (c *assumeCache) add(obj interface{}) {
 	}
 }
 
+//如果obj的版本比缓存要新, 则替换缓存的数据(informer watch到资源更新触发)
 func (c *assumeCache) update(oldObj interface{}, newObj interface{}) {
 	c.add(newObj)
 }
 
+//删除缓存的对象(informer watch到资源删除触发)
 func (c *assumeCache) delete(obj interface{}) {
 	if obj == nil {
 		return
@@ -230,6 +238,7 @@ func (c *assumeCache) getObjVersion(name string, obj interface{}) (int64, error)
 	return objResourceVersion, nil
 }
 
+//从缓存中提取数据
 func (c *assumeCache) getObjInfo(name string) (*objInfo, error) {
 	obj, ok, err := c.store.GetByKey(name)
 	if err != nil {
@@ -246,6 +255,7 @@ func (c *assumeCache) getObjInfo(name string) (*objInfo, error) {
 	return objInfo, nil
 }
 
+//从缓存中替换资源最新版本对象
 func (c *assumeCache) Get(objName string) (interface{}, error) {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
@@ -290,6 +300,7 @@ func (c *assumeCache) List(indexObj interface{}) []interface{} {
 	return allObjs
 }
 
+//如果obj版本比缓存中的对象最新版本要新，则替换到缓存中对象最新版本
 func (c *assumeCache) Assume(obj interface{}) error {
 	name, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
@@ -298,7 +309,7 @@ func (c *assumeCache) Assume(obj interface{}) error {
 
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
-
+	//从缓存中获取对象信息
 	objInfo, err := c.getObjInfo(name)
 	if err != nil {
 		return err
@@ -324,6 +335,7 @@ func (c *assumeCache) Assume(obj interface{}) error {
 	return nil
 }
 
+//用informer缓存的版本替换到最新版本
 func (c *assumeCache) Restore(objName string) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
@@ -359,6 +371,7 @@ func pvStorageClassIndexFunc(obj interface{}) ([]string, error) {
 }
 
 // NewPVAssumeCache creates a PV assume cache.
+//创建带存储类索引的索引器的缓存, 监听PV缓存对象的事件，同步到缓存中
 func NewPVAssumeCache(informer cache.SharedIndexInformer) PVAssumeCache {
 	return &pvAssumeCache{NewAssumeCache(informer, "v1.PersistentVolume", "storageclass", pvStorageClassIndexFunc)}
 }
@@ -421,6 +434,7 @@ type pvcAssumeCache struct {
 }
 
 // NewPVCAssumeCache creates a PVC assume cache.
+//创建带存储类索引的索引器的缓存, 监听PVC缓存对象的事件，同步到缓存中
 func NewPVCAssumeCache(informer cache.SharedIndexInformer) PVCAssumeCache {
 	return &pvcAssumeCache{NewAssumeCache(informer, "v1.PersistentVolumeClaim", "namespace", cache.MetaNamespaceIndexFunc)}
 }
