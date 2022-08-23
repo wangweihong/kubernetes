@@ -50,8 +50,8 @@ var _ Store = (*fsStore)(nil)
 // NewFsStore returns a Store that saves its data in dir
 func NewFsStore(fs utilfs.Filesystem, dir string) Store {
 	return &fsStore{
-		fs:  fs,
-		dir: dir,
+		fs:  fs,  // 文件系统接口
+		dir: dir, // checkpoint数据目录
 	}
 }
 

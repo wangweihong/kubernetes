@@ -32,12 +32,14 @@ const (
 )
 
 var (
+	// pause镜像版本： k8s.gcr.io/pause:3.2
 	defaultPodSandboxImage = defaultPodSandboxImageName +
 		":" + defaultPodSandboxImageVersion
 )
 
 // NewContainerRuntimeOptions will create a new ContainerRuntimeOptions with
 // default values.
+// 默认容器运行时选项参数
 func NewContainerRuntimeOptions() *config.ContainerRuntimeOptions {
 	dockerEndpoint := ""
 	if runtime.GOOS != "windows" {
@@ -49,7 +51,7 @@ func NewContainerRuntimeOptions() *config.ContainerRuntimeOptions {
 		RedirectContainerStreaming: false,
 		DockerEndpoint:             dockerEndpoint,
 		DockershimRootDirectory:    "/var/lib/dockershim",
-		PodSandboxImage:            defaultPodSandboxImage,
+		PodSandboxImage:            defaultPodSandboxImage, // pause镜像版本
 		ImagePullProgressDeadline:  metav1.Duration{Duration: 1 * time.Minute},
 		ExperimentalDockershim:     false,
 

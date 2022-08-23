@@ -112,9 +112,13 @@ const (
 
 // NewKubeletCommand creates a *cobra.Command object with default parameters
 func NewKubeletCommand() *cobra.Command {
+	// 用于整合命令行参数, kubeletConfiguration,全局标志
 	cleanFlagSet := pflag.NewFlagSet(componentKubelet, pflag.ContinueOnError)
+	// 标志位转换"_"成"-"
 	cleanFlagSet.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
+	//kubelet默认标志位
 	kubeletFlags := options.NewKubeletFlags()
+	//kubelet默认配置(可重配置项)，会被--config指定的配置覆盖
 	kubeletConfig, err := options.NewKubeletConfiguration()
 	// programmer error
 	if err != nil {
@@ -152,6 +156,7 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 		DisableFlagParsing: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			// initial flag parse, since we disable cobra's flag parsing
+			// 解析cleanFlagSet标志
 			if err := cleanFlagSet.Parse(args); err != nil {
 				cmd.Usage()
 				klog.Fatal(err)
@@ -176,6 +181,7 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 
 			// short-circuit on verflag
 			verflag.PrintAndExitIfRequested()
+			// 打印接标志位
 			utilflag.PrintFlags(cleanFlagSet)
 
 			// set feature gates from initial flags-based config
@@ -193,7 +199,11 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 			}
 
 			// load kubelet config file, if provided
+			//通过--config指定了KubeletConfiguration配置文件， 读取并替换默认的KubeletConfiguration.
+			//在之前的版本中--config指定的配置文件中的配置选项都可以在kubelet找到对应的标志位,现在这些标志位都已经标记为废弃，全部整合到--config指定的
+			//配置文件中。但因为兼容性问题，kubelet仍然支持这些标志位。需要处理同时指定了--config以及对应标志位时情况。(标志位优先级更高)
 			if configFile := kubeletFlags.KubeletConfigFile; len(configFile) > 0 {
+				// 加载配置文件，注意这里是替换了默认的kubeletConfig
 				kubeletConfig, err = loadConfigFile(configFile)
 				if err != nil {
 					klog.Fatal(err)
@@ -201,6 +211,8 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 				// We must enforce flag precedence by re-parsing the command line into the new object.
 				// This is necessary to preserve backwards-compatibility across binary upgrades.
 				// See issue #56171 for more details.
+				// 解析kubelet命令行参数，因为兼容性, KubeletConfiguration配置仍可以通过命令行参数修改(优先级更高)，因此需要解析
+				// 命令行参数, 替换KubeletConfiguration对应配置项
 				if err := kubeletConfigFlagPrecedence(kubeletConfig, args); err != nil {
 					klog.Fatal(err)
 				}
@@ -212,14 +224,17 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 
 			// We always validate the local configuration (command line + config file).
 			// This is the default "last-known-good" config for dynamic config, and must always remain valid.
+			// 校验kubeletConfig是否合法
 			if err := kubeletconfigvalidation.ValidateKubeletConfiguration(kubeletConfig); err != nil {
 				klog.Fatal(err)
 			}
 
 			// use dynamic kubelet config, if enabled
 			var kubeletConfigController *dynamickubeletconfig.Controller
+			// 指定了动态配置目录? 注:1.22废弃这个特性。（动态配置容易出现问题导致kubelet故障)
 			if dynamicConfigDir := kubeletFlags.DynamicConfigDir.Value(); len(dynamicConfigDir) > 0 {
 				var dynamicKubeletConfig *kubeletconfiginternal.KubeletConfiguration
+				//启动动态配置控制器
 				dynamicKubeletConfig, kubeletConfigController, err = BootstrapKubeletConfigController(dynamicConfigDir,
 					func(kc *kubeletconfiginternal.KubeletConfiguration) error {
 						// Here, we enforce flag precedence inside the controller, prior to the controller's validation sequence,
@@ -243,24 +258,29 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 			}
 
 			// construct a KubeletServer from kubeletFlags and kubeletConfig
+			// kubelet server的配置
 			kubeletServer := &options.KubeletServer{
 				KubeletFlags:         *kubeletFlags,
 				KubeletConfiguration: *kubeletConfig,
 			}
 
 			// use kubeletServer to construct the default KubeletDeps
+			// 据kubelet的配置, 初始化部分kubelet运行时的不安全依赖(如docker客户端配置,Tls证书, 存储卷插件列表)
 			kubeletDeps, err := UnsecuredDependencies(kubeletServer, utilfeature.DefaultFeatureGate)
 			if err != nil {
 				klog.Fatal(err)
 			}
 
 			// add the kubelet config controller to kubeletDeps
+			// kubelet动态配置更新器
 			kubeletDeps.KubeletConfigController = kubeletConfigController
 
 			// set up stopCh here in order to be reused by kubelet and docker shim
+			// 安装信号处理器， 返回stopch用于程序推出前预处理
 			stopCh := genericapiserver.SetupSignalHandler()
 
 			// start the experimental docker shim, if enabled
+			// dockershim实验性质
 			if kubeletServer.KubeletFlags.ExperimentalDockershim {
 				if err := RunDockershim(&kubeletServer.KubeletFlags, kubeletConfig, stopCh); err != nil {
 					klog.Fatal(err)
@@ -270,15 +290,18 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 
 			// run the kubelet
 			klog.V(5).Infof("KubeletConfiguration: %#v", kubeletServer.KubeletConfiguration)
+			// stopch: 用于接收程序收到的预退出清理信号
 			if err := Run(kubeletServer, kubeletDeps, utilfeature.DefaultFeatureGate, stopCh); err != nil {
 				klog.Fatal(err)
 			}
 		},
 	}
-
 	// keep cleanFlagSet separate, so Cobra doesn't pollute it with the global flags
+	//合并kubeletFlags预设标志到cleanFlagSet
 	kubeletFlags.AddFlags(cleanFlagSet)
+	//合并kubeletConfig默认配置到cleanFlagSet
 	options.AddKubeletConfigFlags(cleanFlagSet, kubeletConfig)
+	//合并klog,cadvisor等全局标志到cleanFlagSet
 	options.AddGlobalFlags(cleanFlagSet)
 	cleanFlagSet.BoolP("help", "h", false, fmt.Sprintf("help for %s", cmd.Name()))
 
@@ -321,17 +344,22 @@ func newFakeFlagSet(fs *pflag.FlagSet) *pflag.FlagSet {
 // We must enforce flag precedence by re-parsing the command line into the new object.
 // This is necessary to preserve backwards-compatibility across binary upgrades.
 // See issue #56171 for more details.
+// 解析kubelet命令行参数，因为兼容性, KubeletConfiguration配置仍可以通过命令行参数修改，因此需要解析
 func kubeletConfigFlagPrecedence(kc *kubeletconfiginternal.KubeletConfiguration, args []string) error {
 	// We use a throwaway kubeletFlags and a fake global flagset to avoid double-parses,
 	// as some Set implementations accumulate values from multiple flag invocations.
+	// 添加了GlobalFlag(包括日志，cadvisor配置)的标志集
 	fs := newFakeFlagSet(newFlagSetWithGlobals())
 	// register throwaway KubeletFlags
+	// 将KubeletFlags相关的命令行参数绑定到KubeletFlags对应的配置项
 	options.NewKubeletFlags().AddFlags(fs)
 	// register new KubeletConfiguration
+	// 将KubeletConfiguration相关的命令行参数绑定到kubeletConfiguration对应配置项
 	options.AddKubeletConfigFlags(fs, kc)
 	// Remember original feature gates, so we can merge with flag gates later
 	original := kc.FeatureGates
 	// re-parse flags
+	// 解析命令行参数, 替换对应的配置项
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -364,8 +392,10 @@ func loadConfigFile(name string) (*kubeletconfiginternal.KubeletConfiguration, e
 
 // UnsecuredDependencies returns a Dependencies suitable for being run, or an error if the server setup
 // is not valid.  It will not start any background processes, and does not include authentication/authorization
+// 根据kubelet的配置, 初始化部分kubelet server运行时的不安全依赖(如docker客户端配置,Tls证书, 存储卷插件列表)
 func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.FeatureGate) (*kubelet.Dependencies, error) {
 	// Initialize the TLS Options
+	// 生成用于kubelet https server的TLS选项(包括生成kubelet服务端私钥证书, 读取用于验证客户端证书的CA证书)
 	tlsOptions, err := InitializeTLS(&s.KubeletFlags, &s.KubeletConfiguration)
 	if err != nil {
 		return nil, err
@@ -376,6 +406,7 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 	hu := hostutil.NewHostUtil()
 	var pluginRunner = exec.New()
 
+	// 运行时配置
 	var dockerClientConfig *dockershim.ClientConfig
 	if s.ContainerRuntime == kubetypes.DockerContainerRuntime {
 		dockerClientConfig = &dockershim.ClientConfig{
@@ -385,6 +416,7 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 		}
 	}
 
+	//  根据特性，返回kubelet支持的卷插件
 	plugins, err := ProbeVolumePlugins(featureGate)
 	if err != nil {
 		return nil, err
@@ -414,7 +446,9 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 // not be generated.
 func Run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate featuregate.FeatureGate, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
+	// 打印kubelet版本号
 	klog.Infof("Version: %+v", version.Get())
+	// windows系统做初始化操作
 	if err := initForOS(s.KubeletFlags.WindowsService, s.KubeletFlags.WindowsPriorityClass); err != nil {
 		return fmt.Errorf("failed OS init: %v", err)
 	}
@@ -446,6 +480,7 @@ func setConfigz(cz *configz.Config, kc *kubeletconfiginternal.KubeletConfigurati
 	return nil
 }
 
+// configz接口， 存储KubeletConfig配置
 func initConfigz(kc *kubeletconfiginternal.KubeletConfiguration) error {
 	cz, err := configz.New("kubeletconfig")
 	if err != nil {
@@ -482,6 +517,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		return err
 	}
 	// validate the initial KubeletServer (we set feature gates first, because this validation depends on feature gates)
+	// 检测KubeletServer配置项是否合法
 	if err := options.ValidateKubeletServer(s); err != nil {
 		return err
 	}
@@ -491,8 +527,10 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		return errors.New("cannot exit on lock file contention: no lock file specified")
 	}
 	done := make(chan struct{})
+	// 指定了锁文件路径
 	if s.LockFilePath != "" {
 		klog.Infof("acquiring file lock on %q", s.LockFilePath)
+		// 创建锁文件
 		if err := flock.Acquire(s.LockFilePath); err != nil {
 			return fmt.Errorf("unable to acquire file lock on %q: %v", s.LockFilePath, err)
 		}
@@ -505,6 +543,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 	}
 
 	// Register current configuration with /configz endpoint
+	//将KubeletConfiguration值绑在/configz接口, 访问127.0.0.1:10250/configz获取kubelet配置
 	err = initConfigz(&s.KubeletConfiguration)
 	if err != nil {
 		klog.Errorf("unable to register KubeletConfiguration with configz, error: %v", err)
@@ -516,10 +555,12 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 
 	// About to get clients and such, detect standaloneMode
 	standaloneMode := true
+	// 如果没有通过--kubeconfig指定apiserver通信的配置, 则进入standalone模式
 	if len(s.KubeConfig) > 0 {
 		standaloneMode = false
 	}
 
+	// kubelet运行依赖为空, 则创建运行依赖
 	if kubeDeps == nil {
 		kubeDeps, err = UnsecuredDependencies(s, featureGate)
 		if err != nil {
@@ -528,11 +569,15 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 	}
 
 	if kubeDeps.Cloud == nil {
+		// 如果指定了内置的云提供商或者没有指定云提供商
+		// 如果是外置云提供商，应该是外置云提供商执行初始化
 		if !cloudprovider.IsExternal(s.CloudProvider) {
+			// 初始化云提供商
 			cloud, err := cloudprovider.InitCloudProvider(s.CloudProvider, s.CloudConfigFile)
 			if err != nil {
 				return err
 			}
+			// 如果没有指定云提供商
 			if cloud == nil {
 				klog.V(2).Infof("No cloud provider specified: %q from the config file: %q\n", s.CloudProvider, s.CloudConfigFile)
 			} else {
@@ -542,10 +587,12 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 	}
 
+	// 获取kubelet主机名
 	hostName, err := nodeutil.GetHostname(s.HostnameOverride)
 	if err != nil {
 		return err
 	}
+	// 如果指定了云提供商实例，获取在云提供商中实例名
 	nodeName, err := getNodeName(kubeDeps.Cloud, hostName)
 	if err != nil {
 		return err
@@ -553,6 +600,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 
 	// if in standalone mode, indicate as much by setting all clients to nil
 	switch {
+	//没有指定apiserver的配置
 	case standaloneMode:
 		kubeDeps.KubeClient = nil
 		kubeDeps.EventClient = nil
@@ -560,6 +608,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		klog.Warningf("standalone mode, no API client")
 
 	case kubeDeps.KubeClient == nil, kubeDeps.EventClient == nil, kubeDeps.HeartbeatClient == nil:
+		// 构建可用的客户端配置
 		clientConfig, closeAllConns, err := buildKubeletClientConfig(s, nodeName)
 		if err != nil {
 			return err
@@ -568,7 +617,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 			return errors.New("closeAllConns must be a valid function other than nil")
 		}
 		kubeDeps.OnHeartbeatFailure = closeAllConns
-
+		//构建客户端
 		kubeDeps.KubeClient, err = clientset.NewForConfig(clientConfig)
 		if err != nil {
 			return fmt.Errorf("failed to initialize kubelet client: %v", err)
@@ -599,6 +648,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 	}
 
+	// kubelet server的认证接口
 	if kubeDeps.Auth == nil {
 		auth, runAuthenticatorCAReload, err := BuildAuth(nodeName, kubeDeps.KubeClient, s.KubeletConfiguration)
 		if err != nil {
@@ -816,7 +866,12 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 
 // buildKubeletClientConfig constructs the appropriate client config for the kubelet depending on whether
 // bootstrapping is enabled or client certificate rotation is enabled.
+// 构建可用的客户端配置：
+// 1. 如果运行参数设置了证书轮换, 则启动一个证书管理器。每当证书过期或者证书主体等变更向apiserver发起证书签名申请，创建新的证书，并更新本地文件系统
+//    证书以及生成新的kubeconfig文件。
+// 2. 先加载kubeconfig配置, 如果kubeconfig加载失败或者kubeconfig中证书已经过期。则尝试用boostrap config(如果设置了)去和
 func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName) (*restclient.Config, func(), error) {
+	// kubelet配置了证书轮换(证书过期或变更自动向apiserver申请，通过后更新本地文件系统)
 	if s.RotateCertificates && utilfeature.DefaultFeatureGate.Enabled(features.RotateKubeletClientCertificate) {
 		// Rules for client rotation and the handling of kube config files:
 		//
@@ -836,6 +891,8 @@ func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName)
 		// bootstrap the cert manager with the contents of the initial client config.
 
 		klog.Infof("Client rotation is on, will bootstrap in background")
+		// 先加载kubeconfig配置作为客户端配置，如果kubeconfig不存在或者里面证书过期；如果指定了bootstrap config则尝试使用bootstrap config结合本地文件系统证书生成新的kubeconfig
+		// 配置
 		certConfig, clientConfig, err := bootstrap.LoadClientConfig(s.KubeConfig, s.BootstrapKubeconfig, s.CertDirectory)
 		if err != nil {
 			return nil, nil, err
@@ -845,7 +902,7 @@ func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName)
 		setContentTypeForClient(certConfig, s.ContentType)
 
 		kubeClientConfigOverrides(s, clientConfig)
-
+		// 构建证书管理器。异步证书到期更新证书
 		clientCertificateManager, err := buildClientCertificateManager(certConfig, clientConfig, s.CertDirectory, nodeName)
 		if err != nil {
 			return nil, nil, err
@@ -863,12 +920,16 @@ func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName)
 		}
 
 		klog.V(2).Info("Starting client certificate rotation.")
+		// 向apiserver进行证书签名申请,一旦通过, 更新本地证书私钥对
 		clientCertificateManager.Start()
 
 		return transportConfig, closeAllConns, nil
 	}
 
+	//kubelet指定了自举配置.
 	if len(s.BootstrapKubeconfig) > 0 {
+		// 检测kubeconfigPath(/var/lib/kubelet/kubelet.conf)的配置是否有效且没有过期。如果存在有效且没有过期，则什么都不做。
+		// 否则加载bootstrapPath的自举客户端配置向apiserver创建证书签名申请，通过后更新本地文件系统证书，并且生成kubeconfig配置文件！
 		if err := bootstrap.LoadClientCert(s.KubeConfig, s.BootstrapKubeconfig, s.CertDirectory, nodeName); err != nil {
 			return nil, nil, err
 		}
@@ -903,7 +964,9 @@ func updateDialer(clientConfig *restclient.Config) (func(), error) {
 // buildClientCertificateManager creates a certificate manager that will use certConfig to request a client certificate
 // if no certificate is available, or the most recent clientConfig (which is assumed to point to the cert that the manager will
 // write out).
+// 构建证书管理器(负责证书签名申请)
 func buildClientCertificateManager(certConfig, clientConfig *restclient.Config, certDir string, nodeName types.NodeName) (certificate.Manager, error) {
+	// 获取证书签名请求客户端接口
 	newClientFn := func(current *tls.Certificate) (certificatesclient.CertificateSigningRequestInterface, error) {
 		// If we have a valid certificate, use that to fetch CSRs. Otherwise use the bootstrap
 		// credentials. In the future it would be desirable to change the behavior of bootstrap
@@ -967,29 +1030,34 @@ func getNodeName(cloud cloudprovider.Interface, hostname string) (types.NodeName
 
 // InitializeTLS checks for a configured TLSCertFile and TLSPrivateKeyFile: if unspecified a new self-signed
 // certificate and key file are generated. Returns a configured server.TLSOptions object.
+// 生成用于kubelet https server的TLS选项(包括生成kubelet服务端私钥证书, 读取用于验证客户端证书的CA证书)
 func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletConfiguration) (*server.TLSOptions, error) {
+	// 1. 如果没有设置ServerTLSBootstrap证书自举(自动向apiserver请求新的证书下发) 2. 未指定证书和私钥
 	if !kc.ServerTLSBootstrap && kc.TLSCertFile == "" && kc.TLSPrivateKeyFile == "" {
-		kc.TLSCertFile = path.Join(kf.CertDirectory, "kubelet.crt")
-		kc.TLSPrivateKeyFile = path.Join(kf.CertDirectory, "kubelet.key")
-
+		// kubelet证书, 用于kubelet server启动http server时使用
+		kc.TLSCertFile = path.Join(kf.CertDirectory, "kubelet.crt")       // /var/lib/kubelet/pki/kubelet.crt
+		kc.TLSPrivateKeyFile = path.Join(kf.CertDirectory, "kubelet.key") // /var/lib/kubelet/pki/kubelet.crt
+		// 检测证书文件是否存在且可打开
 		canReadCertAndKey, err := certutil.CanReadCertAndKey(kc.TLSCertFile, kc.TLSPrivateKeyFile)
 		if err != nil {
 			return nil, err
 		}
+		// 证书不存在或者打不开,生成kubelet.crt和kubelet.key证书
 		if !canReadCertAndKey {
 			hostName, err := nodeutil.GetHostname(kf.HostnameOverride)
 			if err != nil {
 				return nil, err
 			}
+			//生成自签名证书cert,key(证书有效期1年)
 			cert, key, err := certutil.GenerateSelfSignedCertKey(hostName, nil, nil)
 			if err != nil {
 				return nil, fmt.Errorf("unable to generate self signed cert: %v", err)
 			}
-
+			// 写到/var/lib/kubelet/pki/kubelet.crt
 			if err := certutil.WriteCert(kc.TLSCertFile, cert); err != nil {
 				return nil, err
 			}
-
+			// 写到/var/lib/kubelet/pki/kubelet.key
 			if err := keyutil.WriteKey(kc.TLSPrivateKeyFile, key); err != nil {
 				return nil, err
 			}
@@ -998,6 +1066,7 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 		}
 	}
 
+	// 密码套件？https://cloud.tencent.com/developer/article/1839188
 	tlsCipherSuites, err := cliflag.TLSCipherSuites(kc.TLSCipherSuites)
 	if err != nil {
 		return nil, err
@@ -1016,14 +1085,15 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 		CertFile: kc.TLSCertFile,
 		KeyFile:  kc.TLSPrivateKeyFile,
 	}
-
+	//指定了用于验证访问kubelet的客户端证书的根证书(就是用CA证书验证客户端证书是否有效)
 	if len(kc.Authentication.X509.ClientCAFile) > 0 {
+		//读取CA证书
 		clientCAs, err := certutil.NewPool(kc.Authentication.X509.ClientCAFile)
 		if err != nil {
 			return nil, fmt.Errorf("unable to load client CA file %s: %v", kc.Authentication.X509.ClientCAFile, err)
 		}
 		// Specify allowed CAs for client certificates
-		tlsOptions.Config.ClientCAs = clientCAs
+		tlsOptions.Config.ClientCAs = clientCAs // 客户端访问时验证客户端证书是否有效。
 		// Populate PeerCertificates in requests, but don't reject connections without verified certificates
 		tlsOptions.Config.ClientAuth = tls.RequestClientCert
 	}
@@ -1243,6 +1313,7 @@ func parseResourceList(m map[string]string) (v1.ResourceList, error) {
 
 // BootstrapKubeletConfigController constructs and bootstrap a configuration controller
 func BootstrapKubeletConfigController(dynamicConfigDir string, transform dynamickubeletconfig.TransformFunc) (*kubeletconfiginternal.KubeletConfiguration, *dynamickubeletconfig.Controller, error) {
+	// 必须要先启动DynamicKubeletConfig特性
 	if !utilfeature.DefaultFeatureGate.Enabled(features.DynamicKubeletConfig) {
 		return nil, nil, fmt.Errorf("failed to bootstrap Kubelet config controller, you must enable the DynamicKubeletConfig feature gate")
 	}
@@ -1251,6 +1322,7 @@ func BootstrapKubeletConfigController(dynamicConfigDir string, transform dynamic
 	}
 
 	// compute absolute path and bootstrap controller
+	// 获取目录的绝对路径
 	dir, err := filepath.Abs(dynamicConfigDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get absolute path for --dynamic-config-dir=%s", dynamicConfigDir)

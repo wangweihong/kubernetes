@@ -43,6 +43,7 @@ import (
 	utiltaints "k8s.io/kubernetes/pkg/util/taints"
 )
 
+//kubelet 根数据目录
 const defaultRootDir = "/var/lib/kubelet"
 
 // KubeletFlags contains configuration flags for the Kubelet.
@@ -52,9 +53,10 @@ const defaultRootDir = "/var/lib/kubelet"
 //   KubeletConfiguration is intended to be shared between nodes.
 // In general, please try to avoid adding flags or configuration fields,
 // we already have a confusingly large amount of them.
+//  指那些不允许在kubelet运行时进行修改的配置集，或者不能在集群中各个Nodes之间共享的配置集。
 type KubeletFlags struct {
-	KubeConfig          string
-	BootstrapKubeconfig string
+	KubeConfig          string // --kubeConfig参数指定apiserver的配置, 默认是"", kubeadm设置为"/etc/kubernetes/kubelet.conf。 kubelet如果不指定，就进入standalone模式(不启动kubelet http server).
+	BootstrapKubeconfig string // --bootstrap-kubeconfig kubelet自举配置, kubeadm设置为是/etc/kubernetes/bootstrap-kubelet.conf.
 
 	// Insert a probability of random errors during calls to the master.
 	ChaosChance float64
@@ -73,7 +75,7 @@ type KubeletFlags struct {
 
 	// HostnameOverride is the hostname used to identify the kubelet instead
 	// of the actual hostname.
-	HostnameOverride string
+	HostnameOverride string // kubelet识别名，默认是使用主机名,但可以通过--hostname-override来替换
 	// NodeIP is IP address of the node.
 	// If set, kubelet will use this IP address for the node.
 	NodeIP string
@@ -83,16 +85,16 @@ type KubeletFlags struct {
 	ProviderID string
 
 	// Container-runtime-specific options.
-	config.ContainerRuntimeOptions
+	config.ContainerRuntimeOptions //容器运行时配置
 
 	// certDirectory is the directory where the TLS certs are located (by
 	// default /var/run/kubernetes). If tlsCertFile and tlsPrivateKeyFile
 	// are provided, this flag will be ignored.
-	CertDirectory string
+	CertDirectory string // --cert-dir. kubelet证书目录 /var/lib/kubelet/pki, 存放kubelet生成自签名证书
 
 	// cloudProvider is the provider for cloud services.
 	// +optional
-	CloudProvider string
+	CloudProvider string // --cloud-provider指定。值为external表示外部云提供商,""表示不指定云提供商，内置云提供商包括azure,aws,vsphere,
 
 	// cloudConfigFile is the path to the cloud provider configuration file.
 	// +optional
@@ -100,7 +102,7 @@ type KubeletFlags struct {
 
 	// rootDirectory is the directory path to place kubelet files (volume
 	// mounts,etc).
-	RootDirectory string
+	RootDirectory string // kubelet根目录，默认是 /var/lib/kubelet
 
 	// The Kubelet will use this directory for checkpointing downloaded configurations and tracking configuration health.
 	// The Kubelet will create this directory if it does not already exist.
@@ -112,7 +114,7 @@ type KubeletFlags struct {
 	// The Kubelet will load its initial configuration from this file.
 	// The path may be absolute or relative; relative paths are under the Kubelet's current working directory.
 	// Omit this flag to use the combination of built-in default configuration values and flags.
-	KubeletConfigFile string
+	KubeletConfigFile string // --config指定的配置文件
 
 	// registerNode enables automatic registration with the apiserver.
 	RegisterNode bool
@@ -134,7 +136,7 @@ type KubeletFlags struct {
 	WindowsPriorityClass string
 
 	// remoteRuntimeEndpoint is the endpoint of remote runtime service
-	RemoteRuntimeEndpoint string
+	RemoteRuntimeEndpoint string //连接运行时端点，linux默认是unix:///var/run/dockershim.sock
 	// remoteImageEndpoint is the endpoint of remote image service
 	RemoteImageEndpoint string
 	// experimentalMounterPath is the path of mounter binary. Leave empty to use the default mount path
@@ -199,6 +201,7 @@ type KubeletFlags struct {
 }
 
 // NewKubeletFlags will create a new KubeletFlags with default values
+// kubelet默认配置位
 func NewKubeletFlags() *KubeletFlags {
 	remoteRuntimeEndpoint := ""
 	if runtime.GOOS == "linux" {
@@ -209,7 +212,7 @@ func NewKubeletFlags() *KubeletFlags {
 
 	return &KubeletFlags{
 		EnableServer:                        true,
-		ContainerRuntimeOptions:             *NewContainerRuntimeOptions(),
+		ContainerRuntimeOptions:             *NewContainerRuntimeOptions(), // 容器运行时默认选项
 		CertDirectory:                       "/var/lib/kubelet/pki",
 		RootDirectory:                       defaultRootDir,
 		MasterServiceNamespace:              metav1.NamespaceDefault,
@@ -231,6 +234,7 @@ func NewKubeletFlags() *KubeletFlags {
 }
 
 // ValidateKubeletFlags validates Kubelet's configuration flags and returns an error if they are invalid.
+// 检测KubeletFlags是否合法
 func ValidateKubeletFlags(f *KubeletFlags) error {
 	// ensure that nobody sets DynamicConfigDir if the dynamic config feature gate is turned off
 	if f.DynamicConfigDir.Provided() && !utilfeature.DefaultFeatureGate.Enabled(features.DynamicKubeletConfig) {
@@ -272,14 +276,19 @@ func getLabelNamespace(key string) string {
 }
 
 // NewKubeletConfiguration will create a new KubeletConfiguration with default values
+// kubelet默认配置项
+// 1. 如果kubelet运行时指定了--config参数, 此默认配置将会被--config指定的文件中的kubeletConfiguration覆盖
 func NewKubeletConfiguration() (*kubeletconfig.KubeletConfiguration, error) {
+	//注册kubelet的KubeletConfiguration资源组
 	scheme, _, err := kubeletscheme.NewSchemeAndCodecs()
 	if err != nil {
 		return nil, err
 	}
 	versioned := &v1beta1.KubeletConfiguration{}
+	// 设置kubelet v1beta1配置默认项
 	scheme.Default(versioned)
 	config := &kubeletconfig.KubeletConfiguration{}
+	// 配置转换v1beta1配置
 	if err := scheme.Convert(versioned, config, nil); err != nil {
 		return nil, err
 	}
@@ -303,12 +312,14 @@ func applyLegacyDefaults(kc *kubeletconfig.KubeletConfiguration) {
 
 // KubeletServer encapsulates all of the parameters necessary for starting up
 // a kubelet. These can either be set via command line or directly.
+// Kubelet的配置表。KubeletServer包含两种配置, 这些两种配置项均可以通过命令行修改
 type KubeletServer struct {
-	KubeletFlags
-	kubeletconfig.KubeletConfiguration
+	KubeletFlags                       // 那些不允许在kubelet运行时进行修改的配置集，或者不能在集群中各个Nodes之间共享的配置集
+	kubeletconfig.KubeletConfiguration // 指可以在集群中各个Nodes之间共享的配置集
 }
 
 // NewKubeletServer will create a new KubeletServer with default values.
+// 默认配置的kubeletServer
 func NewKubeletServer() (*KubeletServer, error) {
 	config, err := NewKubeletConfiguration()
 	if err != nil {
@@ -321,11 +332,14 @@ func NewKubeletServer() (*KubeletServer, error) {
 }
 
 // ValidateKubeletServer validates configuration of KubeletServer and returns an error if the input configuration is invalid.
+// 检测KubeletServer配置项是否合法
 func ValidateKubeletServer(s *KubeletServer) error {
 	// please add any KubeletConfiguration validation to the kubeletconfigvalidation.ValidateKubeletConfiguration function
+	// 校验KubeletConfiguration配置是否合法
 	if err := kubeletconfigvalidation.ValidateKubeletConfiguration(&s.KubeletConfiguration); err != nil {
 		return err
 	}
+	// 检测KubeletFlags是否合法
 	if err := ValidateKubeletFlags(&s.KubeletFlags); err != nil {
 		return err
 	}
@@ -339,6 +353,7 @@ func (s *KubeletServer) AddFlags(fs *pflag.FlagSet) {
 }
 
 // AddFlags adds flags for a specific KubeletFlags to the specified FlagSet
+// 添加KubeletFlags添加到配置集mainfs
 func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 	fs := pflag.NewFlagSet("", pflag.ExitOnError)
 	defer func() {
@@ -350,9 +365,10 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 				f.Hidden = false
 			}
 		})
+		// 将kubeletFlags配置合并到配置集
 		mainfs.AddFlagSet(fs)
 	}()
-
+	// 容器运行时相关配置
 	f.ContainerRuntimeOptions.AddFlags(fs)
 	f.addOSFlags(fs)
 
@@ -381,9 +397,9 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 
 	fs.StringVar(&f.CloudProvider, "cloud-provider", f.CloudProvider, "The provider for cloud services. Specify empty string for running with no cloud provider. If set, the cloud provider determines the name of the node (consult cloud provider documentation to determine if and how the hostname is used).")
 	fs.StringVar(&f.CloudConfigFile, "cloud-config", f.CloudConfigFile, "The path to the cloud provider configuration file.  Empty string for no configuration file.")
-
+	// 根数据目录
 	fs.StringVar(&f.RootDirectory, "root-dir", f.RootDirectory, "Directory path for managing kubelet files (volume mounts,etc).")
-
+	//动态配置目录
 	fs.Var(&f.DynamicConfigDir, "dynamic-config-dir", "The Kubelet will use this directory for checkpointing downloaded configurations and tracking configuration health. The Kubelet will create this directory if it does not already exist. The path may be absolute or relative; relative paths start at the Kubelet's current working directory. Providing this flag enables dynamic Kubelet configuration. The DynamicKubeletConfig feature gate must be enabled to pass this flag; this gate currently defaults to true because the feature is beta.")
 
 	fs.BoolVar(&f.RegisterNode, "register-node", f.RegisterNode, "Register the node with the apiserver. If --kubeconfig is not provided, this flag is irrelevant, as the Kubelet won't have an apiserver to register with.")
@@ -428,6 +444,9 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 }
 
 // AddKubeletConfigFlags adds flags for a specific kubeletconfig.KubeletConfiguration to the specified FlagSet
+// 将KubeConfiguration配置项绑定指定的命名行参数，添加到标志集.
+// 为了向后兼容, kubelet仍然可以通过命令行参数传递KubeletConfigration中的配置项(优先级高于KubeletConfiguration).但这些命令行参数已经
+// 被标记为废弃，不要传递。而是应写到`--config`指定的KubeletConfiguration配置文件中
 func AddKubeletConfigFlags(mainfs *pflag.FlagSet, c *kubeletconfig.KubeletConfiguration) {
 	fs := pflag.NewFlagSet("", pflag.ExitOnError)
 	defer func() {
@@ -437,6 +456,7 @@ func AddKubeletConfigFlags(mainfs *pflag.FlagSet, c *kubeletconfig.KubeletConfig
 		// members of the KubeletConfiguration for the entire deprecation period:
 		// e.g. if a flag was added after this deprecation function, it may not be at the end
 		// of its lifetime yet, even if the rest are.
+		// 用来标志提示这些配置不应该再通过命令行参数传递给kubelet, 而是应该在kubeletConfiguration文件中配置, 由--config来指定KubeletConfiguration文件路径
 		deprecated := "This parameter should be set via the config file specified by the Kubelet's --config flag. See https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file/ for more information."
 		fs.VisitAll(func(f *pflag.Flag) {
 			f.Deprecated = deprecated

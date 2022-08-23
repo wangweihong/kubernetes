@@ -112,6 +112,7 @@ func (c *DynamicFileCAContent) loadCABundle() error {
 	if err != nil {
 		return err
 	}
+	// ca文件是否为空
 	if len(caBundle) == 0 {
 		return fmt.Errorf("missing content for CA bundle %q", c.Name())
 	}

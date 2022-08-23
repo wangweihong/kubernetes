@@ -236,19 +236,20 @@ type Builder func(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 // Dependencies is a bin for things we might consider "injected dependencies" -- objects constructed
 // at runtime that are necessary for running the Kubelet. This is a temporary solution for grouping
 // these objects while we figure out a more comprehensive dependency injection story for the Kubelet.
+// kubelet运行时的依赖
 type Dependencies struct {
 	Options []Option
 
 	// Injected Dependencies
-	Auth                    server.AuthInterface
+	Auth                    server.AuthInterface //kubelet server的验证接口
 	CAdvisorInterface       cadvisor.Interface
 	Cloud                   cloudprovider.Interface
 	ContainerManager        cm.ContainerManager
-	DockerClientConfig      *dockershim.ClientConfig
+	DockerClientConfig      *dockershim.ClientConfig // dockershim的客户端配置
 	EventClient             v1core.EventsGetter
 	HeartbeatClient         clientset.Interface
 	OnHeartbeatFailure      func()
-	KubeClient              clientset.Interface
+	KubeClient              clientset.Interface // 和apiserver通信，通过kubeconfig配置构建
 	Mounter                 mount.Interface
 	HostUtil                hostutil.HostUtils
 	OOMAdjuster             *oom.OOMAdjuster
@@ -256,10 +257,10 @@ type Dependencies struct {
 	PodConfig               *config.PodConfig
 	Recorder                record.EventRecorder
 	Subpather               subpath.Interface
-	VolumePlugins           []volume.VolumePlugin
-	DynamicPluginProber     volume.DynamicPluginProber
-	TLSOptions              *server.TLSOptions
-	KubeletConfigController *kubeletconfig.Controller
+	VolumePlugins           []volume.VolumePlugin      // 支持的卷插件
+	DynamicPluginProber     volume.DynamicPluginProber // flex volume卷插件动态发现目录
+	TLSOptions              *server.TLSOptions         // kubelet https server tls配置。包含验证kubelet证书。用来启动kubelet https server.
+	KubeletConfigController *kubeletconfig.Controller  // kubelet 动态配置控制器
 	RemoteRuntimeService    internalapi.RuntimeService
 	RemoteImageService      internalapi.ImageManagerService
 	criHandler              http.Handler
@@ -336,6 +337,7 @@ func PreInitRuntimeService(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	switch containerRuntime {
+	//docker
 	case kubetypes.DockerContainerRuntime:
 		// TODO: These need to become arguments to a standalone docker shim.
 		pluginSettings := dockershim.NetworkPluginSettings{

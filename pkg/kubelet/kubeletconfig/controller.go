@@ -58,7 +58,7 @@ type Controller struct {
 	// probably just be natively extended to do what you need. Injecting flag precedence transformations
 	// is something of an exception because the caller of this controller (cmd/) is aware of flags, but this
 	// controller's tree (pkg/) is not.
-	transform TransformFunc
+	transform TransformFunc //配置翻译函数
 
 	// pendingConfigSource; write to this channel to indicate that the config source needs to be synced from the API server
 	pendingConfigSource chan bool
@@ -73,7 +73,7 @@ type Controller struct {
 	remoteConfigSourceInformer cache.SharedInformer
 
 	// checkpointStore persists config source checkpoints to a storage layer
-	checkpointStore store.Store
+	checkpointStore store.Store // 检查点目录, 默认是 --dynamic-config-dir指定的目录的子目录store
 }
 
 // NewController constructs a new Controller object and returns it. The dynamicConfigDir

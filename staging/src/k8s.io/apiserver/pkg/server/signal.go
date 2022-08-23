@@ -27,6 +27,8 @@ var shutdownHandler chan os.Signal
 // SetupSignalHandler registered for SIGTERM and SIGINT. A stop channel is returned
 // which is closed on one of these signals. If a second signal is caught, the program
 // is terminated with exit code 1.
+// 监听SIGINT/SIGTERM信号, 信号捕捉第一次通过stopch监听者进行准备退出处理，信号捕捉第二次程序退出
+// 返回stopch用于接收准备退出前处理动作
 func SetupSignalHandler() <-chan struct{} {
 	close(onlyOneSignalHandler) // panics when called twice
 

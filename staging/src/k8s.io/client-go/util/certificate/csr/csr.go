@@ -46,7 +46,9 @@ import (
 // status, once approved by API server, it will return the API server's issued
 // certificate (pem-encoded). If there is any errors, or the watch timeouts, it
 // will return an error.
+// 向apiserver创建证书申请，成功创建则返回。如果之前存在且内容兼容没有过期则返回，否则报错
 func RequestCertificate(client certificatesclient.CertificateSigningRequestInterface, csrData []byte, name string, signerName string, usages []certificates.KeyUsage, privateKey interface{}) (req *certificates.CertificateSigningRequest, err error) {
+	// 构建csr资源对象
 	csr := &certificates.CertificateSigningRequest{
 		// Username, UID, Groups will be injected by API server.
 		TypeMeta: metav1.TypeMeta{Kind: "CertificateSigningRequest"},
@@ -63,9 +65,12 @@ func RequestCertificate(client certificatesclient.CertificateSigningRequestInter
 		csr.GenerateName = "csr-"
 	}
 
+	//  向apiserver创建csr资源
 	req, err = client.Create(context.TODO(), csr, metav1.CreateOptions{})
 	switch {
+	// 创建成功
 	case err == nil:
+	// csr已经存在
 	case errors.IsAlreadyExists(err) && len(name) > 0:
 		klog.Infof("csr for this node already exists, reusing")
 		req, err = client.Get(context.TODO(), name, metav1.GetOptions{})
@@ -83,6 +88,7 @@ func RequestCertificate(client certificatesclient.CertificateSigningRequestInter
 }
 
 // WaitForCertificate waits for a certificate to be issued until timeout, or returns an error.
+// 等待apiserver审批证书签名申请，如果通过返回证书内容
 func WaitForCertificate(ctx context.Context, client certificatesclient.CertificateSigningRequestInterface, req *certificates.CertificateSigningRequest) (certData []byte, err error) {
 	fieldSelector := fields.OneTermEqualSelector("metadata.name", req.Name).String()
 	lw := &cache.ListWatch{
@@ -113,14 +119,18 @@ func WaitForCertificate(ctx context.Context, client certificatesclient.Certifica
 				return false, fmt.Errorf("csr %q changed UIDs", csr.Name)
 			}
 			for _, c := range csr.Status.Conditions {
+				// 证书申请已经被拒绝。如果被拒绝就不再等待。
 				if c.Type == certificates.CertificateDenied {
 					return false, fmt.Errorf("certificate signing request is not approved, reason: %v, message: %v", c.Reason, c.Message)
 				}
+				// 证书申请已经通过
 				if c.Type == certificates.CertificateApproved {
+					//
 					if csr.Status.Certificate != nil {
 						klog.V(2).Infof("certificate signing request %s is issued", csr.Name)
 						return true, nil
 					}
+					// 证书申请通过, 但证书还没有更新到csr对象中
 					klog.V(2).Infof("certificate signing request %s is approved, waiting to be issued", csr.Name)
 				}
 			}

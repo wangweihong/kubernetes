@@ -27,6 +27,7 @@ import (
 
 // MakeCSR generates a PEM-encoded CSR using the supplied private key, subject, and SANs.
 // All key types that are implemented via crypto.Signer are supported (This includes *rsa.PrivateKey and *ecdsa.PrivateKey.)
+// 创建通过privateKey私钥签名过的CSR模板.
 func MakeCSR(privateKey interface{}, subject *pkix.Name, dnsSANs []string, ipSANs []net.IP) (csr []byte, err error) {
 	template := &x509.CertificateRequest{
 		Subject:     *subject,
@@ -41,10 +42,14 @@ func MakeCSR(privateKey interface{}, subject *pkix.Name, dnsSANs []string, ipSAN
 // key and certificate request as a template. All key types that are
 // implemented via crypto.Signer are supported (This includes *rsa.PrivateKey
 // and *ecdsa.PrivateKey.)
+// 基于模板(定好了服务主体,以及DNS[可选],IP地址[可选])创建通过privateKey私钥签名过的CSR
 func MakeCSRFromTemplate(privateKey interface{}, template *x509.CertificateRequest) ([]byte, error) {
+	// 证书申请模板
 	t := *template
-	t.SignatureAlgorithm = sigType(privateKey)
 
+	// 基于私钥得到对应的签名算法
+	t.SignatureAlgorithm = sigType(privateKey)
+	//创建x509证书申请, 并使用privateKey进行签名
 	csrDER, err := x509.CreateCertificateRequest(cryptorand.Reader, &t, privateKey)
 	if err != nil {
 		return nil, err
@@ -54,10 +59,11 @@ func MakeCSRFromTemplate(privateKey interface{}, template *x509.CertificateReque
 		Type:  CertificateRequestBlockType,
 		Bytes: csrDER,
 	}
-
+	// 对证书申请数据进行加密
 	return pem.EncodeToMemory(csrPemBlock), nil
 }
 
+// 根据私钥对象找到对应的签名算法
 func sigType(privateKey interface{}) x509.SignatureAlgorithm {
 	// Customize the signature for RSA keys, depending on the key size
 	if privateKey, ok := privateKey.(*rsa.PrivateKey); ok {

@@ -25,6 +25,7 @@ set -o pipefail
 KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 source "$KUBE_ROOT/build/common.sh"
 
+# 不设置,默认为y
 KUBE_RUN_COPY_OUTPUT="${KUBE_RUN_COPY_OUTPUT:-y}"
 
 kube::build::verify_prereqs
@@ -36,6 +37,7 @@ else
   kube::log::status "Output from this container will NOT be rsynced out upon completion. Set KUBE_RUN_COPY_OUTPUT=y to enable."
 fi
 
+echo "$@"
 kube::build::run_build_command "$@"
 
 if [[ ${KUBE_RUN_COPY_OUTPUT} =~ ^[yY]$ ]]; then

@@ -43,6 +43,7 @@ const (
 )
 
 // MakeEllipticPrivateKeyPEM creates an ECDSA private key
+// 创建ecdsa加密的私钥并转换成PEM格式
 func MakeEllipticPrivateKeyPEM() ([]byte, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
 	if err != nil {
@@ -74,20 +75,25 @@ func WriteKey(keyPath string, data []byte) error {
 
 // LoadOrGenerateKeyFile looks for a key in the file at the given path. If it
 // can't find one, it will generate a new key and store it there.
+// 加载私钥文件，如果存在且合法则什么都不做，否则生成新的ecdsa私钥，并写到私钥文件中
 func LoadOrGenerateKeyFile(keyPath string) (data []byte, wasGenerated bool, err error) {
+	//加载私钥文件
 	loadedData, err := ioutil.ReadFile(keyPath)
 	// Call verifyKeyData to ensure the file wasn't empty/corrupt.
+	// 私钥文件存在而且合法，则直接返回
 	if err == nil && verifyKeyData(loadedData) {
 		return loadedData, false, err
 	}
+	// 加载私钥文件失败，直接报错
 	if !os.IsNotExist(err) {
 		return nil, false, fmt.Errorf("error loading key from %s: %v", keyPath, err)
 	}
-
+	// 创建ecdsa加密的私钥并转换成PEM格式
 	generatedData, err := MakeEllipticPrivateKeyPEM()
 	if err != nil {
 		return nil, false, fmt.Errorf("error generating key: %v", err)
 	}
+	// 写入到私钥路径
 	if err := WriteKey(keyPath, generatedData); err != nil {
 		return nil, false, fmt.Errorf("error writing key to %s: %v", keyPath, err)
 	}
@@ -96,6 +102,7 @@ func LoadOrGenerateKeyFile(keyPath string) (data []byte, wasGenerated bool, err 
 
 // MarshalPrivateKeyToPEM converts a known private key type of RSA or ECDSA to
 // a PEM encoded block or returns an error.
+// 私钥转换成PEM格式
 func MarshalPrivateKeyToPEM(privateKey crypto.PrivateKey) ([]byte, error) {
 	switch t := privateKey.(type) {
 	case *ecdsa.PrivateKey:
@@ -158,6 +165,7 @@ func verifyKeyData(data []byte) bool {
 
 // ParsePrivateKeyPEM returns a private key parsed from a PEM block in the supplied data.
 // Recognizes PEM blocks for "EC PRIVATE KEY", "RSA PRIVATE KEY", or "PRIVATE KEY"
+// 从pem文件中解析出私钥对象
 func ParsePrivateKeyPEM(keyData []byte) (interface{}, error) {
 	var privateKeyPemBlock *pem.Block
 	for {

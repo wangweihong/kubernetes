@@ -24,11 +24,12 @@ import (
 )
 
 // ContainerRuntimeOptions defines options for the container runtime.
+// 容器运行时配置
 type ContainerRuntimeOptions struct {
 	// General Options.
 
 	// ContainerRuntime is the container runtime to use.
-	ContainerRuntime string
+	ContainerRuntime string //容器运行时类型, 如docker
 	// RuntimeCgroups that container runtime is expected to be isolated in.
 	RuntimeCgroups string
 	// RedirectContainerStreaming enables container streaming redirect.
@@ -45,37 +46,37 @@ type ContainerRuntimeOptions struct {
 
 	// DockershimRootDirectory is the path to the dockershim root directory. Defaults to
 	// /var/lib/dockershim if unset. Exposed for integration testing (e.g. in OpenShift).
-	DockershimRootDirectory string
+	DockershimRootDirectory string //dockershim目录，默认是/var/lib/dockershim
 	// Enable dockershim only mode.
 	ExperimentalDockershim bool
 	// PodSandboxImage is the image whose network/ipc namespaces
 	// containers in each pod will use.
-	PodSandboxImage string
+	PodSandboxImage string // 用于共享Pod内容器的网络/ipc命名空间的沙盒容器镜像(pause镜像), 当前版本默认为k8s.gcr.io/pause:3.2
 	// DockerEndpoint is the path to the docker endpoint to communicate with.
 	DockerEndpoint string
 	// If no pulling progress is made before the deadline imagePullProgressDeadline,
 	// the image pulling will be cancelled. Defaults to 1m0s.
 	// +optional
-	ImagePullProgressDeadline metav1.Duration
+	ImagePullProgressDeadline metav1.Duration //在该时间没有发起镜像拉取(没有镜像拉取进度), 镜像拉取将会取消
 
 	// Network plugin options.
 
 	// networkPluginName is the name of the network plugin to be invoked for
 	// various events in kubelet/pod lifecycle
-	NetworkPluginName string
+	NetworkPluginName string //网络插件名
 	// NetworkPluginMTU is the MTU to be passed to the network plugin,
 	// and overrides the default MTU for cases where it cannot be automatically
 	// computed (such as IPSEC).
 	NetworkPluginMTU int32
 	// CNIConfDir is the full path of the directory in which to search for
 	// CNI config files
-	CNIConfDir string
+	CNIConfDir string // cni插件配置
 	// CNIBinDir is the full path of the directory in which to search for
 	// CNI plugin binaries
-	CNIBinDir string
+	CNIBinDir string //  cni插件二进制目录
 	// CNICacheDir is the full path of the directory in which CNI should store
 	// cache files
-	CNICacheDir string
+	CNICacheDir string // cni插件缓存文件目录
 }
 
 // AddFlags adds flags to the container runtime, according to ContainerRuntimeOptions.

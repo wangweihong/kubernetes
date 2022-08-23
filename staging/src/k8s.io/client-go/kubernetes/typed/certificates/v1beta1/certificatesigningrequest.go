@@ -37,6 +37,7 @@ type CertificateSigningRequestsGetter interface {
 }
 
 // CertificateSigningRequestInterface has methods to work with CertificateSigningRequest resources.
+// apiserver的证书签名请求接口
 type CertificateSigningRequestInterface interface {
 	Create(ctx context.Context, certificateSigningRequest *v1beta1.CertificateSigningRequest, opts v1.CreateOptions) (*v1beta1.CertificateSigningRequest, error)
 	Update(ctx context.Context, certificateSigningRequest *v1beta1.CertificateSigningRequest, opts v1.UpdateOptions) (*v1beta1.CertificateSigningRequest, error)

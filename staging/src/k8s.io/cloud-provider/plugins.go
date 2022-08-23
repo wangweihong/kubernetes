@@ -95,7 +95,7 @@ func IsExternal(name string) bool {
 func InitCloudProvider(name string, configFilePath string) (Interface, error) {
 	var cloud Interface
 	var err error
-
+	// 没有指定云提供商
 	if name == "" {
 		klog.Info("No cloud provider specified.")
 		return nil, nil

@@ -96,6 +96,7 @@ const (
 	// Signs client certificates that will be honored as client-certs by the
 	// kube-apiserver for a kubelet.
 	// May be auto-approved by kube-controller-manager.
+	// kubelet向apiserver创建证书签名请求对象时(CSR)的签名
 	KubeAPIServerClientKubeletSignerName = "kubernetes.io/kube-apiserver-client-kubelet"
 
 	// Signs serving certificates that are honored as a valid kubelet serving

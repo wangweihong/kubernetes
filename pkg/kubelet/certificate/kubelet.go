@@ -40,6 +40,7 @@ import (
 
 // NewKubeletServerCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate
 // or returns an error.
+// kubelet服务端证书管理器
 func NewKubeletServerCertificateManager(kubeClient clientset.Interface, kubeCfg *kubeletconfig.KubeletConfiguration, nodeName types.NodeName, getAddresses func() []v1.NodeAddress, certDirectory string) (certificate.Manager, error) {
 	var certSigningRequestClient certificatesclient.CertificateSigningRequestInterface
 	if kubeClient != nil && kubeClient.CertificatesV1beta1() != nil {
@@ -191,6 +192,7 @@ func addressesToHostnamesAndIPs(addresses []v1.NodeAddress) (dnsNames []string, 
 // NewKubeletClientCertificateManager sets up a certificate manager without a
 // client that can be used to sign new certificates (or rotate). If a CSR
 // client is set later, it may begin rotating/renewing the client cert.
+// 创建 kubelet客户端的证书管理器
 func NewKubeletClientCertificateManager(
 	certDirectory string,
 	nodeName types.NodeName,
@@ -230,7 +232,7 @@ func NewKubeletClientCertificateManager(
 		},
 	)
 	legacyregistry.Register(certificateRenewFailure)
-
+	// 创建客户端证书凭证
 	m, err := certificate.NewManager(&certificate.Config{
 		ClientFn: clientFn,
 		Template: &x509.CertificateRequest{

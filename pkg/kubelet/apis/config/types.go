@@ -102,9 +102,9 @@ type KubeletConfiguration struct {
 	// tlsPrivateKeyFile are not provided, a self-signed certificate
 	// and key are generated for the public address and saved to the directory
 	// passed to the Kubelet's --cert-dir flag.
-	TLSCertFile string
+	TLSCertFile string //--tls-cert-file。 指定kubelet server启动时的证书.如果不指定默认为--cert-dir(/var/lib/kubelet/pki/)下kubelet.crt
 	// tlsPrivateKeyFile is the file containing x509 private key matching tlsCertFile
-	TLSPrivateKeyFile string
+	TLSPrivateKeyFile string //--tls-private-key-file。 指定kubelet server启动的私钥。如果不指定默认为--cert-dir(/var/lib/kubelet/pki/)下kubelet.key
 	// TLSCipherSuites is the list of allowed cipher suites for the server.
 	// Values are from tls package constants (https://golang.org/pkg/crypto/tls/#pkg-constants).
 	TLSCipherSuites []string
@@ -121,9 +121,9 @@ type KubeletConfiguration struct {
 	// the certificates.k8s.io API. This requires an approver to approve the
 	// certificate signing requests. The RotateKubeletServerCertificate feature
 	// must be enabled.
-	ServerTLSBootstrap bool
+	ServerTLSBootstrap bool // --rotate-server-certificates. 当证书到期时, 自动向apiserver申请新的证书
 	// authentication specifies how requests to the Kubelet's server are authenticated
-	Authentication KubeletAuthentication
+	Authentication KubeletAuthentication // 配置kubelet server的验证方式
 	// authorization specifies how requests to the Kubelet's server are authorized
 	Authorization KubeletAuthorization
 	// registryPullQPS is the limit of registry pulls per second.
@@ -189,20 +189,20 @@ type KubeletConfiguration struct {
 	// How frequently to calculate and cache volume disk usage for all pods
 	VolumeStatsAggPeriod metav1.Duration
 	// KubeletCgroups is the absolute name of cgroups to isolate the kubelet in
-	KubeletCgroups string
+	KubeletCgroups string // --kubelet-cgroup
 	// SystemCgroups is absolute name of cgroups in which to place
 	// all non-kernel processes that are not already in a container. Empty
 	// for no container. Rolling back the flag requires a reboot.
 	SystemCgroups string
 	// CgroupRoot is the root cgroup to use for pods.
 	// If CgroupsPerQOS is enabled, this is the root of the QoS cgroup hierarchy.
-	CgroupRoot string
+	CgroupRoot string //默认为""
 	// Enable QoS based Cgroup hierarchy: top level cgroups for QoS Classes
 	// And all Burstable and BestEffort pods are brought up under their
 	// specific top level QoS cgroup.
 	CgroupsPerQOS bool
 	// driver that the kubelet uses to manipulate cgroups on the host (cgroupfs or systemd)
-	CgroupDriver string
+	CgroupDriver string // cgroup驱动, 现在有croupfs和systemd两种. 默认为cgroupfs
 	// CPUManagerPolicy is the name of the policy to use.
 	// Requires the CPUManager feature gate to be enabled.
 	CPUManagerPolicy string
@@ -375,6 +375,7 @@ type KubeletWebhookAuthorization struct {
 }
 
 // KubeletAuthentication holds the Kubetlet Authentication setttings.
+
 type KubeletAuthentication struct {
 	// x509 contains settings related to x509 client certificate authentication
 	X509 KubeletX509Authentication
@@ -389,7 +390,7 @@ type KubeletX509Authentication struct {
 	// clientCAFile is the path to a PEM-encoded certificate bundle. If set, any request presenting a client certificate
 	// signed by one of the authorities in the bundle is authenticated with a username corresponding to the CommonName,
 	// and groups corresponding to the Organization in the client certificate.
-	ClientCAFile string
+	ClientCAFile string // 用于验证访问kubelet的客户端的证书的CA证书
 }
 
 // KubeletWebhookAuthentication contains settings related to webhook authentication

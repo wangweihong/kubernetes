@@ -36,6 +36,7 @@ readonly DOCKER_MACHINE_DRIVER=${DOCKER_MACHINE_DRIVER:-"virtualbox --virtualbox
 # This will canonicalize the path
 KUBE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd -P)
 
+# 初始化一些变量
 source "${KUBE_ROOT}/hack/lib/init.sh"
 
 # Constants
@@ -44,6 +45,11 @@ readonly KUBE_BUILD_IMAGE_CROSS_TAG="$(cat "${KUBE_ROOT}/build/build-image/cross
 
 readonly KUBE_DOCKER_REGISTRY="${KUBE_DOCKER_REGISTRY:-k8s.gcr.io}"
 readonly KUBE_BASE_IMAGE_REGISTRY="${KUBE_BASE_IMAGE_REGISTRY:-us.gcr.io/k8s-artifacts-prod/build-image}"
+
+echo "KUBE_BUILD_IMAGE_REPO:$KUBE_BUILD_IMAGE_REPO"
+echo "KUBE_BUILD_IMAGE_CROSS_TAG:$KUBE_BUILD_IMAGE_CROSS_TAG"
+echo "KUBE_DOCKER_REGISTRY:$KUBE_DOCKER_REGISTRY"
+echo "KUBE_BASE_IMAGE_REGISTRY:$KUBE_BASE_IMAGE_REGISTRY"
 
 # This version number is used to cause everyone to rebuild their data containers
 # and build image.  This is especially useful for automated build systems like
@@ -131,7 +137,7 @@ kube::build::get_docker_wrapped_binaries() {
 #   LOCAL_OUTPUT_BUILD_CONTEXT
 function kube::build::verify_prereqs() {
   local -r require_docker=${1:-true}
-  kube::log::status "Verifying Prerequisites...."
+  kube::log::status "Verifying Prerequisites....检测依赖是否存在，例如tar,rsync,docker"
   kube::build::ensure_tar || return 1
   kube::build::ensure_rsync || return 1
   if ${require_docker}; then
@@ -141,6 +147,7 @@ function kube::build::verify_prereqs() {
     fi
     kube::util::ensure_docker_daemon_connectivity || return 1
 
+    #  设置KUBE_VERBOSE级别可以调整日志级别
     if (( KUBE_VERBOSE > 6 )); then
       kube::log::status "Docker Version:"
       "${DOCKER[@]}" version | kube::log::info_from_stdin
@@ -160,6 +167,20 @@ function kube::build::verify_prereqs() {
   KUBE_DATA_CONTAINER_NAME="${KUBE_DATA_CONTAINER_NAME_BASE}-${KUBE_BUILD_IMAGE_VERSION}"
   DOCKER_MOUNT_ARGS=(--volumes-from "${KUBE_DATA_CONTAINER_NAME}")
   LOCAL_OUTPUT_BUILD_CONTEXT="${LOCAL_OUTPUT_IMAGE_STAGING}/${KUBE_BUILD_IMAGE}"
+
+  echo "KUBE_GIT_BRANCH: $KUBE_GIT_BRANCH"
+  echo "KUBE_ROOT_HASH: $KUBE_ROOT_HASH"
+  echo "KUBE_BUILD_IMAGE_TAG_BASE: $KUBE_BUILD_IMAGE_TAG_BASE"
+  echo "KUBE_BUILD_IMAGE_TAG: $KUBE_BUILD_IMAGE_TAG"
+  echo "KUBE_BUILD_IMAGE: $KUBE_BUILD_IMAGE"
+  echo "KUBE_BUILD_CONTAINER_NAME_BASE: $KUBE_BUILD_CONTAINER_NAME_BASE"
+  echo "KUBE_BUILD_CONTAINER_NAME: $KUBE_BUILD_CONTAINER_NAME"
+  echo "KUBE_RSYNC_CONTAINER_NAME_BASE: $KUBE_RSYNC_CONTAINER_NAME_BASE"
+  echo "KUBE_RSYNC_CONTAINER_NAME: $KUBE_RSYNC_CONTAINER_NAME"
+  echo "KUBE_DATA_CONTAINER_NAME_BASE: $KUBE_DATA_CONTAINER_NAME_BASE"
+  echo "KUBE_DATA_CONTAINER_NAME: $KUBE_DATA_CONTAINER_NAME"
+  echo "DOCKER_MOUNT_ARGS: $DOCKER_MOUNT_ARGS"
+  echo "LOCAL_OUTPUT_BUILD_CONTEXT: $LOCAL_OUTPUT_BUILD_CONTEXT"
 
   kube::version::get_version_vars
   kube::version::save_version_vars "${KUBE_ROOT}/.dockerized-kube-version-defs"
@@ -238,6 +259,7 @@ function kube::build::is_gnu_sed() {
   [[ $(sed --version 2>&1) == *GNU* ]]
 }
 
+# 确认rsync工具是否存在
 function kube::build::ensure_rsync() {
   if [[ -z "$(which rsync)" ]]; then
     kube::log::error "Can't find 'rsync' in PATH, please fix and retry."
@@ -274,6 +296,7 @@ function kube::build::ensure_docker_in_path() {
   fi
 }
 
+# 确认tar命令存在
 function kube::build::ensure_tar() {
   if [[ -n "${TAR:-}" ]]; then
     return
@@ -416,27 +439,36 @@ function kube::build::clean() {
 # Set up the context directory for the kube-build image and build it.
 function kube::build::build_image() {
   mkdir -p "${LOCAL_OUTPUT_BUILD_CONTEXT}"
+
+  echo "kube::build::build_image: dir:${LOCAL_OUTPUT_BUILD_CONTEXT}"
   # Make sure the context directory owned by the right user for syncing sources to container.
   chown -R "${USER_ID}":"${GROUP_ID}" "${LOCAL_OUTPUT_BUILD_CONTEXT}"
 
   cp /etc/localtime "${LOCAL_OUTPUT_BUILD_CONTEXT}/"
 
+  echo "KUBE_ROOT:${KUBE_ROOT}"
   cp "${KUBE_ROOT}/build/build-image/Dockerfile" "${LOCAL_OUTPUT_BUILD_CONTEXT}/Dockerfile"
   cp "${KUBE_ROOT}/build/build-image/rsyncd.sh" "${LOCAL_OUTPUT_BUILD_CONTEXT}/"
   dd if=/dev/urandom bs=512 count=1 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' | dd bs=32 count=1 2>/dev/null > "${LOCAL_OUTPUT_BUILD_CONTEXT}/rsyncd.password"
   chmod go= "${LOCAL_OUTPUT_BUILD_CONTEXT}/rsyncd.password"
 
+  echo "1.kube::build::update_dockerfile"
   kube::build::update_dockerfile
+  echo "2. kube::build::set_proxy"
+
   kube::build::set_proxy
+  echo "3.   kube::build::docker_build \"${KUBE_BUILD_IMAGE}\" \"${LOCAL_OUTPUT_BUILD_CONTEXT}\" \'false\'"
   kube::build::docker_build "${KUBE_BUILD_IMAGE}" "${LOCAL_OUTPUT_BUILD_CONTEXT}" 'false'
 
   # Clean up old versions of everything
+  echo "4. cleanup all old versin things"
   kube::build::docker_delete_old_containers "${KUBE_BUILD_CONTAINER_NAME_BASE}" "${KUBE_BUILD_CONTAINER_NAME}"
   kube::build::docker_delete_old_containers "${KUBE_RSYNC_CONTAINER_NAME_BASE}" "${KUBE_RSYNC_CONTAINER_NAME}"
   kube::build::docker_delete_old_containers "${KUBE_DATA_CONTAINER_NAME_BASE}" "${KUBE_DATA_CONTAINER_NAME}"
   kube::build::docker_delete_old_images "${KUBE_BUILD_IMAGE_REPO}" "${KUBE_BUILD_IMAGE_TAG_BASE}" "${KUBE_BUILD_IMAGE_TAG}"
 
   kube::build::ensure_data_container
+  echo "sync to container"
   kube::build::sync_to_container
 }
 
@@ -520,6 +552,8 @@ function kube::build::ensure_data_container() {
 # already been built.
 function kube::build::run_build_command() {
   kube::log::status "Running build command..."
+  echo "ready to exec ${KUBE_BUILD_CONTAINER_NAME} -- $@"
+
   kube::build::run_build_command_ex "${KUBE_BUILD_CONTAINER_NAME}" -- "$@"
 }
 
@@ -602,16 +636,27 @@ function kube::build::run_build_command_ex() {
 
   # Clean up container from any previous run
   kube::build::destroy_container "${container_name}"
+
+  echo "run command ${docker_cmd[@]} ${cmd[@]}"
+
   "${docker_cmd[@]}" "${cmd[@]}"
   if [[ "${detach}" == false ]]; then
     kube::build::destroy_container "${container_name}"
   fi
 }
 
+
+# 探测rsync是否正常
 function kube::build::rsync_probe {
   # Wait unil rsync is up and running.
   local tries=20
   while (( tries > 0 )) ; do
+    echo "rsync \"rsync://k8s@${1}:${2}/ --password-file=\"${LOCAL_OUTPUT_BUILD_CONTEXT}/rsyncd.password\" &> /dev/null"
+
+#    if rsync "rsync://k8s@${1}:${2}/" --password-file="${LOCAL_OUTPUT_BUILD_CONTEXT}/rsyncd.password" &> ./rsync.log  ; then
+#      return 0
+#    fi
+
     if rsync "rsync://k8s@${1}:${2}/" \
          --password-file="${LOCAL_OUTPUT_BUILD_CONTEXT}/rsyncd.password" \
          &> /dev/null ; then
@@ -649,6 +694,7 @@ function kube::build::start_rsyncd_container() {
 
   local container_ip
   container_ip=$("${DOCKER[@]}" inspect --format '{{ .NetworkSettings.IPAddress }}' "${KUBE_RSYNC_CONTAINER_NAME}")
+  echo "container_ip: ${container_ip}"
 
   # Sometimes we can reach rsync through localhost and a NAT'd port.  Other
   # times (when we are running in another docker container on the Jenkins
@@ -656,9 +702,11 @@ function kube::build::start_rsyncd_container() {
   # strategy that works in all cases so we test to figure out which situation we
   # are in.
   if kube::build::rsync_probe 127.0.0.1 "${mapped_port}"; then
+    echo "rsync_probe 127.0.0.1 ${mapped_port}"
     KUBE_RSYNC_ADDR="127.0.0.1:${mapped_port}"
     return 0
   elif kube::build::rsync_probe "${container_ip}" ${KUBE_CONTAINER_RSYNC_PORT}; then
+    echo "rsync_probe ${container_ip} ${KUBE_CONTAINER_RSYNC_PORT}"
     KUBE_RSYNC_ADDR="${container_ip}:${KUBE_CONTAINER_RSYNC_PORT}"
     return 0
   fi

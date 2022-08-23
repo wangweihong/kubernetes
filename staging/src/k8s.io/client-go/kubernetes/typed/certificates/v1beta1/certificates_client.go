@@ -34,6 +34,7 @@ type CertificatesV1beta1Client struct {
 	restClient rest.Interface
 }
 
+//
 func (c *CertificatesV1beta1Client) CertificateSigningRequests() CertificateSigningRequestInterface {
 	return newCertificateSigningRequests(c)
 }

@@ -38,11 +38,11 @@ import (
 // against the global flagsets from "flag" and "github.com/spf13/pflag".
 // We do this in order to prevent unwanted flags from leaking into the Kubelet's flagset.
 func AddGlobalFlags(fs *pflag.FlagSet) {
-	addKlogFlags(fs)
-	addCadvisorFlags(fs)
-	addCredentialProviderFlags(fs)
-	verflag.AddFlags(fs)
-	logs.AddFlags(fs)
+	addKlogFlags(fs)               // klog日志相关标志位追加到fs
+	addCadvisorFlags(fs)           // cadvisor相关标志位追加到fs
+	addCredentialProviderFlags(fs) // azure-container-registry-config相关标志位
+	verflag.AddFlags(fs)           // 版本标志位
+	logs.AddFlags(fs)              //日志标志位
 }
 
 // normalize replaces underscores with hyphens
@@ -92,6 +92,7 @@ func addCredentialProviderFlags(fs *pflag.FlagSet) {
 }
 
 // addKlogFlags adds flags from k8s.io/klog
+// klog标志位
 func addKlogFlags(fs *pflag.FlagSet) {
 	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	klog.InitFlags(local)

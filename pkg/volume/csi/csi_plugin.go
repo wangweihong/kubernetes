@@ -67,6 +67,7 @@ type csiPlugin struct {
 }
 
 // ProbeVolumePlugins returns implemented plugins
+// 返回csi插件对象
 func ProbeVolumePlugins() []volume.VolumePlugin {
 	p := &csiPlugin{
 		host:         nil,

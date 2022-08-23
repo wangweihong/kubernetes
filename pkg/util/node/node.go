@@ -47,6 +47,7 @@ const (
 )
 
 // GetHostname returns OS's hostname if 'hostnameOverride' is empty; otherwise, return 'hostnameOverride'.
+// 如果没有指定主机名，使用操作系统主机名作为主机名
 func GetHostname(hostnameOverride string) (string, error) {
 	hostName := hostnameOverride
 	if len(hostName) == 0 {

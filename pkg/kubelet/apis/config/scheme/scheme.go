@@ -30,9 +30,11 @@ import (
 // for adjusting the behavior of the CodecFactory, for example enable strict decoding.
 func NewSchemeAndCodecs(mutators ...serializer.CodecFactoryOptionsMutator) (*runtime.Scheme, *serializer.CodecFactory, error) {
 	scheme := runtime.NewScheme()
+	//注册kubelet.config.k8s.io/__internal
 	if err := kubeletconfig.AddToScheme(scheme); err != nil {
 		return nil, nil, err
 	}
+	//注册kubelet.config.k8s.io/v1beta1
 	if err := kubeletconfigv1beta1.AddToScheme(scheme); err != nil {
 		return nil, nil, err
 	}

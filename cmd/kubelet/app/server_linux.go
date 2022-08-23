@@ -21,12 +21,14 @@ import (
 	"k8s.io/utils/inotify"
 )
 
+//监视锁文件的创建和删除
 func watchForLockfileContention(path string, done chan struct{}) error {
 	watcher, err := inotify.NewWatcher()
 	if err != nil {
 		klog.Errorf("unable to create watcher for lockfile: %v", err)
 		return err
 	}
+	// 监视文件的打开和删除
 	if err = watcher.AddWatch(path, inotify.InOpen|inotify.InDeleteSelf); err != nil {
 		klog.Errorf("unable to watch lockfile: %v", err)
 		return err

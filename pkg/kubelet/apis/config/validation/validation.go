@@ -31,6 +31,7 @@ import (
 )
 
 // ValidateKubeletConfiguration validates `kc` and returns an error if it is invalid
+// 校验KubeletConfiguration配置是否合法
 func ValidateKubeletConfiguration(kc *kubeletconfig.KubeletConfiguration) error {
 	allErrors := []error{}
 

@@ -26,6 +26,7 @@ import (
 
 // CanReadCertAndKey returns true if the certificate and key files already exists,
 // otherwise returns false. If lost one of cert and key, returns error.
+// 证书和私钥是否同时存在
 func CanReadCertAndKey(certPath, keyPath string) (bool, error) {
 	certReadable := canReadFile(certPath)
 	keyReadable := canReadFile(keyPath)
