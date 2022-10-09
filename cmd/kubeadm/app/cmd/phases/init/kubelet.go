@@ -42,7 +42,8 @@ func NewKubeletStartPhase() workflow.Phase {
 		Short:   "Write kubelet settings and (re)start the kubelet",
 		Long:    "Write a file with KubeletConfiguration and an environment file with node specific kubelet settings, and then (re)start kubelet.",
 		Example: kubeletStartPhaseExample,
-		Run:     runKubeletStart,
+		//从kubeadm配置中提取kubelet相关配置,写到/var/lib/kubelet/config.yaml,并尝试启动 kubelet.service
+		Run: runKubeletStart,
 		InheritFlags: []string{
 			options.CfgPath,
 			options.NodeCRISocket,
@@ -52,6 +53,7 @@ func NewKubeletStartPhase() workflow.Phase {
 }
 
 // runKubeletStart executes kubelet start logic.
+// 从kubeadm配置中提取kubelet相关配置,写到/var/lib/kubelet/config.yaml,并尝试启动 kubelet.service
 func runKubeletStart(c workflow.RunData) error {
 	data, ok := c.(InitData)
 	if !ok {
@@ -68,16 +70,20 @@ func runKubeletStart(c workflow.RunData) error {
 	// Write env file with flags for the kubelet to use. We do not need to write the --register-with-taints for the control-plane,
 	// as we handle that ourselves in the mark-control-plane phase
 	// TODO: Maybe we want to do that some time in the future, in order to remove some logic from the mark-control-plane phase?
+	// 将kubelet运行时参数写到/var/lib/kubelet/kubeadm-flags.env
 	if err := kubeletphase.WriteKubeletDynamicEnvFile(&data.Cfg().ClusterConfiguration, &data.Cfg().NodeRegistration, false, data.KubeletDir()); err != nil {
 		return errors.Wrap(err, "error writing a dynamic environment file for the kubelet")
 	}
 
+	// 从kubeadm配置读取kubelet的配置
 	kubeletCfg, ok := data.Cfg().ComponentConfigs[componentconfigs.KubeletGroup]
 	if !ok {
 		return errors.New("no kubelet component config found in the active component config set")
 	}
 
 	// Write the kubelet configuration file to disk.
+	// 将kubeadm配置中kubelet部分写到/var/lib/kubelet/config.yaml
+	// apt安装的kubelet,会配置kubelet运行时指定参数--config=/var/lib/kubelet/config.yaml
 	if err := kubeletphase.WriteConfigToDisk(kubeletCfg, data.KubeletDir()); err != nil {
 		return errors.Wrap(err, "error writing kubelet configuration to disk")
 	}
@@ -85,6 +91,7 @@ func runKubeletStart(c workflow.RunData) error {
 	// Try to start the kubelet service in case it's inactive
 	if !data.DryRun() {
 		fmt.Println("[kubelet-start] Starting the kubelet")
+		// 利用systemd重启kubelet, 重启失败不报错
 		kubeletphase.TryStartKubelet()
 	}
 

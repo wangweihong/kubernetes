@@ -23,6 +23,7 @@ import (
 )
 
 // TryStartKubelet attempts to bring up kubelet service
+// 利用systemd启动kubelet, 启动失败不报错
 func TryStartKubelet() {
 	// If we notice that the kubelet service is inactive, try to start it
 	initSystem, err := initsystem.GetInitSystem()

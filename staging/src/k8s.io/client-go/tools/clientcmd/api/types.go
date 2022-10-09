@@ -69,7 +69,7 @@ type Cluster struct {
 	// +k8s:conversion-gen=false
 	LocationOfOrigin string
 	// Server is the address of the kubernetes cluster (https://hostname:port).
-	Server string `json:"server"`
+	Server string `json:"server"` // 集群地址
 	// TLSServerName is used to check server certificate. If TLSServerName is empty, the hostname used to contact the server is used.
 	// +optional
 	TLSServerName string `json:"tls-server-name,omitempty"`

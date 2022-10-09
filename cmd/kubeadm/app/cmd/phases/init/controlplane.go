@@ -62,6 +62,7 @@ func getPhaseDescription(component string) string {
 }
 
 // NewControlPlanePhase creates a kubeadm workflow phase that implements bootstrapping the control plane.
+// 生成kube-apiserver/kube-controller-manager/kube-scheduler组件的static pod
 func NewControlPlanePhase() workflow.Phase {
 	phase := workflow.Phase{
 		Name:  "control-plane",
@@ -136,6 +137,7 @@ func runControlPlanePhase(c workflow.RunData) error {
 	return nil
 }
 
+//在/etc/kubernetes/manifests中生成apiserver等组件static pod yaml
 func runControlPlaneSubphase(component string) func(c workflow.RunData) error {
 	return func(c workflow.RunData) error {
 		data, ok := c.(InitData)

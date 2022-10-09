@@ -83,9 +83,11 @@ func runEtcdPhaseLocal() func(c workflow.RunData) error {
 		cfg := data.Cfg()
 
 		// Add etcd static pod spec only if external etcd is not configured
+
 		if cfg.Etcd.External == nil {
 			// creates target folder if doesn't exist already
 			if !data.DryRun() {
+				// 创建etcd数据存储目录
 				if err := os.MkdirAll(cfg.Etcd.Local.DataDir, 0700); err != nil {
 					return errors.Wrapf(err, "failed to create etcd directory %q", cfg.Etcd.Local.DataDir)
 				}
@@ -97,6 +99,7 @@ func runEtcdPhaseLocal() func(c workflow.RunData) error {
 				return errors.Wrap(err, "error creating local etcd static pod manifest file")
 			}
 		} else {
+			// 如果指定了外部etcd, 则什么都不做
 			klog.V(1).Infoln("[etcd] External etcd mode. Skipping the creation of a manifest for local etcd")
 		}
 		return nil

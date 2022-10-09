@@ -639,6 +639,7 @@ func GetDNSVersion(dnsType kubeadmapi.DNSAddOnType) string {
 }
 
 // GetKubeletConfigMapName returns the right ConfigMap name for the right branch of k8s
+// kubelet-config-v1.18.0
 func GetKubeletConfigMapName(k8sVersion *version.Version) string {
 	return fmt.Sprintf("%s%d.%d", KubeletBaseConfigurationConfigMapPrefix, k8sVersion.Major(), k8sVersion.Minor())
 }

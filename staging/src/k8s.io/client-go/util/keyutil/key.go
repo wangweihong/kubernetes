@@ -102,7 +102,7 @@ func LoadOrGenerateKeyFile(keyPath string) (data []byte, wasGenerated bool, err 
 
 // MarshalPrivateKeyToPEM converts a known private key type of RSA or ECDSA to
 // a PEM encoded block or returns an error.
-// 私钥转换成PEM格式
+// 私钥根据加密算法转换成PEM格式
 func MarshalPrivateKeyToPEM(privateKey crypto.PrivateKey) ([]byte, error) {
 	switch t := privateKey.(type) {
 	case *ecdsa.PrivateKey:
@@ -128,6 +128,7 @@ func MarshalPrivateKeyToPEM(privateKey crypto.PrivateKey) ([]byte, error) {
 
 // PrivateKeyFromFile returns the private key in rsa.PrivateKey or ecdsa.PrivateKey format from a given PEM-encoded file.
 // Returns an error if the file could not be read or if the private key could not be parsed.
+// 从指定文件读取私钥
 func PrivateKeyFromFile(file string) (interface{}, error) {
 	data, err := ioutil.ReadFile(file)
 	if err != nil {

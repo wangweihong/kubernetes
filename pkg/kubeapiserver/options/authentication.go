@@ -48,13 +48,13 @@ type BuiltInAuthenticationOptions struct {
 	APIAudiences    []string
 	Anonymous       *AnonymousAuthenticationOptions
 	BootstrapToken  *BootstrapTokenAuthenticationOptions
-	ClientCert      *genericoptions.ClientCertAuthenticationOptions
+	ClientCert      *genericoptions.ClientCertAuthenticationOptions //客户端证书验证方式
 	OIDC            *OIDCAuthenticationOptions
 	PasswordFile    *PasswordFileAuthenticationOptions
 	RequestHeader   *genericoptions.RequestHeaderAuthenticationOptions
 	ServiceAccounts *ServiceAccountAuthenticationOptions
 	TokenFile       *TokenFileAuthenticationOptions
-	WebHook         *WebHookAuthenticationOptions
+	WebHook         *WebHookAuthenticationOptions // webhook验证方式
 
 	TokenSuccessCacheTTL time.Duration
 	TokenFailureCacheTTL time.Duration

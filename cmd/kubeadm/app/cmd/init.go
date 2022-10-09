@@ -86,17 +86,17 @@ var (
 // Please note that this structure includes the public kubeadm config API, but only a subset of the options
 // supported by this api will be exposed as a flag.
 type initOptions struct {
-	cfgPath                 string
+	cfgPath                 string // kubeadm 配置文件路径
 	skipTokenPrint          bool
 	dryRun                  bool
-	kubeconfigDir           string
-	kubeconfigPath          string
+	kubeconfigDir           string // 默认/etc/kubernetes
+	kubeconfigPath          string // kubeconfig路径, 默认为/etc/kubernetes/admin.conf
 	featureGatesString      string
 	ignorePreflightErrors   []string
-	bto                     *options.BootstrapTokenOptions
-	externalInitCfg         *kubeadmapiv1beta2.InitConfiguration
-	externalClusterCfg      *kubeadmapiv1beta2.ClusterConfiguration
-	uploadCerts             bool
+	bto                     *options.BootstrapTokenOptions          // bootstrap token选项
+	externalInitCfg         *kubeadmapiv1beta2.InitConfiguration    // bootstrap token选项和apiserver端口,节点注册等初始配置。和bto选项重复了
+	externalClusterCfg      *kubeadmapiv1beta2.ClusterConfiguration // 集群相关配置，包括etcd,网络,k8s版本,schedule版本。
+	uploadCerts             bool                                    // 上传ca证书? 当ca.crt或者front-proxy-ca.crt使用了外部的ca证书时, 设为true即会报错。
 	skipCertificateKeyPrint bool
 	kustomizeDir            string
 }
@@ -110,15 +110,15 @@ type initData struct {
 	cfg                     *kubeadmapi.InitConfiguration
 	skipTokenPrint          bool
 	dryRun                  bool
-	kubeconfigDir           string
-	kubeconfigPath          string
+	kubeconfigDir           string // /etc/kuberntes
+	kubeconfigPath          string //
 	ignorePreflightErrors   sets.String
-	certificatesDir         string
+	certificatesDir         string // 证书存放目录. 默认设置为/etc/kubernetes/pki
 	dryRunDir               string
-	externalCA              bool
+	externalCA              bool // 是否使用了外部CA证书。如果/etc/kubernets/ca.crt/ca.key都存在就认为是使用了外部CA
 	client                  clientset.Interface
 	outputWriter            io.Writer
-	uploadCerts             bool
+	uploadCerts             bool // 上传证书?
 	skipCertificateKeyPrint bool
 	kustomizeDir            string
 }
@@ -127,6 +127,7 @@ type initData struct {
 // NB. initOptions is exposed as parameter for allowing unit testing of
 //     the newInitOptions method, that implements all the command options validation logic
 func NewCmdInit(out io.Writer, initOptions *initOptions) *cobra.Command {
+	// 创建默认init命令选项，包括集群配置，bootstraptoken等。
 	if initOptions == nil {
 		initOptions = newInitOptions()
 	}
@@ -172,13 +173,13 @@ func NewCmdInit(out io.Writer, initOptions *initOptions) *cobra.Command {
 
 	// initialize the workflow runner with the list of phases
 	initRunner.AppendPhase(phases.NewPreflightPhase())
-	initRunner.AppendPhase(phases.NewKubeletStartPhase())
-	initRunner.AppendPhase(phases.NewCertsPhase())
-	initRunner.AppendPhase(phases.NewKubeConfigPhase())
-	initRunner.AppendPhase(phases.NewControlPlanePhase())
-	initRunner.AppendPhase(phases.NewEtcdPhase())
-	initRunner.AppendPhase(phases.NewWaitControlPlanePhase())
-	initRunner.AppendPhase(phases.NewUploadConfigPhase())
+	initRunner.AppendPhase(phases.NewKubeletStartPhase())     //从kubeadm配置中提取kubelet相关配置,写到/var/lib/kubelet/config.yaml,并尝试启动 kubelet.service
+	initRunner.AppendPhase(phases.NewCertsPhase())            // 1. 生成一系列自签名CA证书(密钥对),以及CA签名的证书密钥(ca.crt,etcd.crt,front-proxy-ca.crt). 如果已存在, 则直接使用已存在的 2.生成service account密钥文件sa.key,公钥文件sa.pub
+	initRunner.AppendPhase(phases.NewKubeConfigPhase())       // 生成/etc/kubernetes/kubeadm.conf,kubelet.conf,controller-manager.conf,scheduler.conf
+	initRunner.AppendPhase(phases.NewControlPlanePhase())     // 生成kube-apiserver/kube-controller-manager/kube-scheduler组件的yaml文件
+	initRunner.AppendPhase(phases.NewEtcdPhase())             // 创建etcd组件(外置则什么都不做)
+	initRunner.AppendPhase(phases.NewWaitControlPlanePhase()) //// 等待kubelet/kube-apiserver健康
+	initRunner.AppendPhase(phases.NewUploadConfigPhase())     // 上传kubelet config, kubeadm config
 	initRunner.AppendPhase(phases.NewUploadCertsPhase())
 	initRunner.AppendPhase(phases.NewMarkControlPlanePhase())
 	initRunner.AppendPhase(phases.NewBootstrapTokenPhase())
@@ -280,15 +281,19 @@ func AddInitOtherFlags(flagSet *flag.FlagSet, initOptions *initOptions) {
 }
 
 // newInitOptions returns a struct ready for being used for creating cmd init flags.
+// kubeadm init默认选项
 func newInitOptions() *initOptions {
 	// initialize the public kubeadm config API by applying defaults
+	// 初始化bootstrap token配置和apiserver默认端口6443
 	externalInitCfg := &kubeadmapiv1beta2.InitConfiguration{}
 	kubeadmscheme.Scheme.Default(externalInitCfg)
 
+	// 默认集群配置
 	externalClusterCfg := &kubeadmapiv1beta2.ClusterConfiguration{}
 	kubeadmscheme.Scheme.Default(externalClusterCfg)
 
 	// Create the options object for the bootstrap token-related flags, and override the default value for .Description
+	// bootstrap token默认选项(用于kubelet自举使用)
 	bto := options.NewBootstrapTokenOptions()
 	bto.Description = "The default bootstrap token generated by 'kubeadm init'."
 
@@ -305,6 +310,8 @@ func newInitOptions() *initOptions {
 // newInitData returns a new initData struct to be used for the execution of the kubeadm init workflow.
 // This func takes care of validating initOptions passed to the command, and then it converts
 // options into the internal InitConfiguration type that is used as input all the phases in the kubeadm init workflow
+// 校验initOptions参数是否合法
+// 初始化InitConfig和ClusterConfig, 检测是否使用了外部CA证书
 func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io.Writer) (*initData, error) {
 	// Re-apply defaults to the public kubeadm API (this will set only values not exposed/not set as a flags)
 	kubeadmscheme.Scheme.Default(options.externalInitCfg)
@@ -327,6 +334,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 
 	// Either use the config file if specified, or convert public kubeadm API to the internal InitConfiguration
 	// and validates InitConfiguration
+	// 加载kubeadm配置文件
 	cfg, err := configutil.LoadOrDefaultInitConfiguration(options.cfgPath, options.externalInitCfg, options.externalClusterCfg)
 	if err != nil {
 		return nil, err
@@ -340,6 +348,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 	cfg.NodeRegistration.IgnorePreflightErrors = ignorePreflightErrorsSet.List()
 
 	// override node name and CRI socket from the command line options
+	// 如果命令行也指定节点注册名，命令行优先级比配置文件高。
 	if options.externalInitCfg.NodeRegistration.Name != "" {
 		cfg.NodeRegistration.Name = options.externalInitCfg.NodeRegistration.Name
 	}
@@ -347,6 +356,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		cfg.NodeRegistration.CRISocket = options.externalInitCfg.NodeRegistration.CRISocket
 	}
 
+	// 检测apiserver地址是否合法(非环回广播地址)
 	if err := configutil.VerifyAPIServerBindAddress(cfg.LocalAPIEndpoint.AdvertiseAddress); err != nil {
 		return nil, err
 	}
@@ -361,9 +371,11 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 			return nil, errors.Wrap(err, "couldn't create a temporary directory")
 		}
 	}
-
 	// Checks if an external CA is provided by the user (when the CA Cert is present but the CA Key is not)
+	// 如果ca证书和ca私钥都同时存在，则意味着没有使用外部CA. 如果使用了外部CA,就需要验证apiserver和apiserver-kubelet-client两个证书签名是否有效。
+	// 注意此时可能不存在ca证书和私钥(由kubeadm生成), 因此报错仅在使用外部证书时处理(必须要存在证书).
 	externalCA, err := certsphase.UsingExternalCA(&cfg.ClusterConfiguration)
+	// 使用了外部ca
 	if externalCA {
 		// In case the certificates signed by CA (that should be provided by the user) are missing or invalid,
 		// returns, because kubeadm can't regenerate them without the CA Key
@@ -377,12 +389,14 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		if options.dryRun {
 			kubeconfigDir = dryRunDir
 		}
+		// 检测kubeconfig配置是否指定了正确的外部CA证书
 		if err := kubeconfigphase.ValidateKubeconfigsForExternalCA(kubeconfigDir, cfg); err != nil {
 			return nil, err
 		}
 	}
-
 	// Checks if an external Front-Proxy CA is provided by the user (when the Front-Proxy CA Cert is present but the Front-Proxy CA Key is not)
+	// 如果/etc/kubernetes/pki/front-proxy-ca.crt存在但front-proxy-ca.key不存在，则认为是使用了外部front-proxy-ca
+	// 注意此时可能不存在ca证书和私钥, 因此报错仅在使用外部证书时处理(必须要存在证书)
 	externalFrontProxyCA, err := certsphase.UsingExternalFrontProxyCA(&cfg.ClusterConfiguration)
 	if externalFrontProxyCA {
 		// In case the certificates signed by Front-Proxy CA (that should be provided by the user) are missing or invalid,
@@ -392,6 +406,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		}
 	}
 
+	// 指定了外部ca不允许上传证书
 	if options.uploadCerts && (externalCA || externalFrontProxyCA) {
 		return nil, errors.New("can't use upload-certs with an external CA or an external front-proxy CA")
 	}

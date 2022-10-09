@@ -209,7 +209,7 @@ func (e *Runner) Run(args []string) error {
 		if run, ok := phaseRunFlags[p.generatedName]; !run || !ok {
 			return nil
 		}
-
+		fmt.Printf("----> 执行阶段:%v\n", p.generatedName)
 		// Errors if phases that are meant to create special subcommands only
 		// are wrongly assigned Run Methods
 		if p.RunAllSiblings && (p.RunIf != nil || p.Run != nil) {
@@ -328,6 +328,7 @@ func (e *Runner) BindToCommand(cmd *cobra.Command) {
 			phaseSelector = p.parent.generatedName
 		}
 
+		// 执行子阶段
 		// creates phase subcommand
 		phaseCmd := &cobra.Command{
 			Use:     strings.ToLower(p.Name),

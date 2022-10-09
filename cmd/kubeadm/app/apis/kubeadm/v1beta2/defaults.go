@@ -191,7 +191,9 @@ func SetDefaults_BootstrapTokens(obj *InitConfiguration) {
 }
 
 // SetDefaults_BootstrapToken sets the defaults for an individual Bootstrap Token
+// 初始化bootstrap token选项
 func SetDefaults_BootstrapToken(bt *BootstrapToken) {
+	// bootstrap token 默认TTL为24小时
 	if bt.TTL == nil {
 		bt.TTL = &metav1.Duration{
 			Duration: constants.DefaultTokenDuration,

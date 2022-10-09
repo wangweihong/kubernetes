@@ -38,6 +38,7 @@ import (
 
 // WriteConfigToDisk writes the kubelet config object down to a file
 // Used at "kubeadm init" and "kubeadm upgrade" time
+// 将kubeadm配置写到/var/lib/kubelet/config.yaml
 func WriteConfigToDisk(kubeletCfg kubeadmapi.ComponentConfig, kubeletDir string) error {
 
 	kubeletBytes, err := kubeletCfg.Marshal()
@@ -55,10 +56,11 @@ func CreateConfigMap(cfg *kubeadmapi.ClusterConfiguration, client clientset.Inte
 	if err != nil {
 		return err
 	}
-
+	// configmap名: kubelet-config-v1.18.0
 	configMapName := kubeadmconstants.GetKubeletConfigMapName(k8sVersion)
 	fmt.Printf("[kubelet] Creating a ConfigMap %q in namespace %s with the configuration for the kubelets in the cluster\n", configMapName, metav1.NamespaceSystem)
 
+	// 从配置中找到kubelet配置
 	kubeletCfg, ok := cfg.ComponentConfigs[componentconfigs.KubeletGroup]
 	if !ok {
 		return errors.New("no kubelet component config found in the active component config set")
@@ -158,6 +160,7 @@ func configMapRBACName(k8sVersion *version.Version) string {
 }
 
 // writeConfigBytesToDisk writes a byte slice down to disk at the specific location of the kubelet config file
+// 将kubeadm配置写到/var/lib/kubelet/config.yaml
 func writeConfigBytesToDisk(b []byte, kubeletDir string) error {
 	configFile := filepath.Join(kubeletDir, kubeadmconstants.KubeletConfigurationFileName)
 	fmt.Printf("[kubelet-start] Writing kubelet configuration to file %q\n", configFile)

@@ -28,6 +28,7 @@ import (
 )
 
 // CreateBasic creates a basic, general KubeConfig object that then can be extended
+// 创建clientcmdapi config对象
 func CreateBasic(serverURL, clusterName, userName string, caCert []byte) *clientcmdapi.Config {
 	// Use the cluster and the username as the context name
 	contextName := fmt.Sprintf("%s@%s", userName, clusterName)
@@ -51,6 +52,7 @@ func CreateBasic(serverURL, clusterName, userName string, caCert []byte) *client
 }
 
 // CreateWithCerts creates a KubeConfig object with access to the API server with client certificates
+// 创建clientcmdapi config对象,并设置客户端证书和私钥
 func CreateWithCerts(serverURL, clusterName, userName string, caCert []byte, clientKey []byte, clientCert []byte) *clientcmdapi.Config {
 	config := CreateBasic(serverURL, clusterName, userName, caCert)
 	config.AuthInfos[userName] = &clientcmdapi.AuthInfo{

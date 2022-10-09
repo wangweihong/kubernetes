@@ -18,7 +18,6 @@ package kubeadm
 
 import (
 	"crypto/x509"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/cmd/kubeadm/app/features"
@@ -41,7 +40,7 @@ type InitConfiguration struct {
 	ClusterConfiguration `json:"-"`
 
 	// BootstrapTokens is respected at `kubeadm init` time and describes a set of Bootstrap Tokens to create.
-	BootstrapTokens []BootstrapToken
+	BootstrapTokens []BootstrapToken // kubeadm init时创建的bootstrap token
 
 	// NodeRegistration holds fields that relate to registering the new control-plane node to the cluster
 	NodeRegistration NodeRegistrationOptions
@@ -52,11 +51,11 @@ type InitConfiguration struct {
 	// configuration object lets you customize what IP/DNS name and port the local API server advertises it's accessible
 	// on. By default, kubeadm tries to auto-detect the IP of the default interface and use that, but in case that process
 	// fails you may set the desired value here.
-	LocalAPIEndpoint APIEndpoint
+	LocalAPIEndpoint APIEndpoint //当前节点上运行apiserver的 监听ip和端口
 
 	// CertificateKey sets the key with which certificates and keys are encrypted prior to being uploaded in
 	// a secret in the cluster during the uploadcerts init phase.
-	CertificateKey string
+	CertificateKey string // 私钥
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -67,7 +66,7 @@ type ClusterConfiguration struct {
 
 	// ComponentConfigs holds component configs known to kubeadm, should long-term only exist in the internal kubeadm API
 	// +k8s:conversion-gen=false
-	ComponentConfigs ComponentConfigMap
+	ComponentConfigs ComponentConfigMap // 各个组件配置表
 
 	// Etcd holds configuration for etcd.
 	Etcd Etcd
@@ -88,7 +87,7 @@ type ClusterConfiguration struct {
 	// control plane instances.
 	// e.g.  in environments with enforced node recycling, the ControlPlaneEndpoint
 	// could be used for assigning a stable DNS to the control plane.
-	ControlPlaneEndpoint string
+	ControlPlaneEndpoint string //  集群控制面板对外访问端点。如果是高可用负载均衡VIP, 可以设置该项为VIP地址
 
 	// APIServer contains extra settings for the API server control plane component
 	APIServer APIServer
@@ -103,7 +102,7 @@ type ClusterConfiguration struct {
 	DNS DNS
 
 	// CertificatesDir specifies where to store or look for all required certificates.
-	CertificatesDir string
+	CertificatesDir string // 证书存放目录. 默认设置为/etc/kubernetes/pki
 
 	// ImageRepository sets the container registry to pull images from.
 	// If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`)
@@ -122,7 +121,7 @@ type ClusterConfiguration struct {
 	UseHyperKubeImage bool
 
 	// FeatureGates enabled by the user.
-	FeatureGates map[string]bool
+	FeatureGates map[string]bool // 用户可以启动的特性。如果改变证书的加密算法
 
 	// The cluster name
 	ClusterName string
@@ -147,7 +146,7 @@ type APIServer struct {
 	CertSANs []string
 
 	// TimeoutForControlPlane controls the timeout that we use for API server to appear
-	TimeoutForControlPlane *metav1.Duration
+	TimeoutForControlPlane *metav1.Duration //
 }
 
 // DNSAddOnType defines string identifying DNS add-on types
@@ -212,7 +211,7 @@ type NodeRegistrationOptions struct {
 	// Name is the `.Metadata.Name` field of the Node API object that will be created in this `kubeadm init` or `kubeadm join` operation.
 	// This field is also used in the CommonName field of the kubelet's client certificate to the API server.
 	// Defaults to the hostname of the node if not provided.
-	Name string
+	Name string // kubelet注册的节点名
 
 	// CRISocket is used to retrieve container runtime info. This information will be annotated to the Node API object, for later re-use
 	CRISocket string
@@ -247,19 +246,19 @@ type Networking struct {
 type BootstrapToken struct {
 	// Token is used for establishing bidirectional trust between nodes and control-planes.
 	// Used for joining nodes in the cluster.
-	Token *BootstrapTokenString
+	Token *BootstrapTokenString // kubelet自举时和apiserver通信用的bootstrap token
 	// Description sets a human-friendly message why this token exists and what it's used
 	// for, so other administrators can know its purpose.
 	Description string
 	// TTL defines the time to live for this token. Defaults to 24h.
 	// Expires and TTL are mutually exclusive.
-	TTL *metav1.Duration
+	TTL *metav1.Duration // bootstrap token secret存活时间，过期secret会被删除, bootstrap token不再可用。
 	// Expires specifies the timestamp when this token expires. Defaults to being set
 	// dynamically at runtime based on the TTL. Expires and TTL are mutually exclusive.
 	Expires *metav1.Time
 	// Usages describes the ways in which this token can be used. Can by default be used
 	// for establishing bidirectional trust, but that can be changed here.
-	Usages []string
+	Usages []string //指定该token的使用目的。如signing(签名)
 	// Groups specifies the extra groups that this token will authenticate as when/if
 	// used for authentication
 	Groups []string
@@ -274,7 +273,7 @@ type Etcd struct {
 
 	// External describes how to connect to an external etcd cluster
 	// Local and External are mutually exclusive
-	External *ExternalEtcd
+	External *ExternalEtcd //使用了外置的ETCD配置
 }
 
 // LocalEtcd describes that kubeadm should run an etcd cluster locally
@@ -284,7 +283,7 @@ type LocalEtcd struct {
 
 	// DataDir is the directory etcd will place its data.
 	// Defaults to "/var/lib/etcd".
-	DataDir string
+	DataDir string // etcd数据目录
 
 	// ExtraArgs are extra arguments provided to the etcd binary
 	// when run inside a static pod.
@@ -404,6 +403,7 @@ func (cfg *ClusterConfiguration) GetControlPlaneImageRepository() string {
 }
 
 // PublicKeyAlgorithm returns the type of encryption keys used in the cluster.
+// 根据配置决定公钥加密方式，默认是RSA,可选ECDSA
 func (cfg *ClusterConfiguration) PublicKeyAlgorithm() x509.PublicKeyAlgorithm {
 	if features.Enabled(cfg.FeatureGates, features.PublicKeysECDSA) {
 		return x509.ECDSA

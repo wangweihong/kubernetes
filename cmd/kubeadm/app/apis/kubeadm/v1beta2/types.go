@@ -55,6 +55,7 @@ type InitConfiguration struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // ClusterConfiguration contains cluster-wide configuration for a kubeadm cluster
+// kubeadm要部署的集群的配置
 type ClusterConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -93,7 +94,7 @@ type ClusterConfiguration struct {
 	DNS DNS `json:"dns,omitempty"`
 
 	// CertificatesDir specifies where to store or look for all required certificates.
-	CertificatesDir string `json:"certificatesDir,omitempty"`
+	CertificatesDir string `json:"certificatesDir,omitempty"` // 存放证书的目录, 默认是/etc/kubernetes/pki
 
 	// ImageRepository sets the container registry to pull images from.
 	// If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`)
@@ -200,7 +201,7 @@ type NodeRegistrationOptions struct {
 	Name string `json:"name,omitempty"`
 
 	// CRISocket is used to retrieve container runtime info. This information will be annotated to the Node API object, for later re-use
-	CRISocket string `json:"criSocket,omitempty"`
+	CRISocket string `json:"criSocket,omitempty"` // 容器运行通信端口
 
 	// Taints specifies the taints the Node API object should be registered with. If this field is unset, i.e. nil, in the `kubeadm init` process
 	// it will be defaulted to []v1.Taint{'node-role.kubernetes.io/master=""'}. If you don't want to taint your control-plane node, set this field to an

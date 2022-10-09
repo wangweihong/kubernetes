@@ -50,6 +50,7 @@ func runUploadCerts(c workflow.RunData) error {
 		return errors.New("upload-certs phase invoked with an invalid data struct")
 	}
 
+	// 没有指定上传证书则忽略
 	if !data.UploadCerts() {
 		fmt.Printf("[upload-certs] Skipping phase. Please see --%s\n", options.UploadCerts)
 		return nil
@@ -60,6 +61,7 @@ func runUploadCerts(c workflow.RunData) error {
 	}
 
 	if len(data.CertificateKey()) == 0 {
+		// 生成随机数，用于进行上传的证书进行AES加密操作。
 		certificateKey, err := copycerts.CreateCertificateKey()
 		if err != nil {
 			return err

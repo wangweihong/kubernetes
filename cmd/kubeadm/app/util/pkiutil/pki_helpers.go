@@ -60,16 +60,19 @@ const (
 // CertConfig is a wrapper around certutil.Config extending it with PublicKeyAlgorithm.
 type CertConfig struct {
 	certutil.Config
-	PublicKeyAlgorithm x509.PublicKeyAlgorithm
+	PublicKeyAlgorithm x509.PublicKeyAlgorithm // 私钥加密算法。支持ECDSA和RSA
 }
 
 // NewCertificateAuthority creates new certificate and private key for the certificate authority
+// 创建私钥，生成证书有效期为10年的X509自签名CA证书
 func NewCertificateAuthority(config *CertConfig) (*x509.Certificate, crypto.Signer, error) {
+	// 根据私钥加密算法生成密钥对
 	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create private key while generating CA certificate")
 	}
 
+	// 生成证书有效期为10年的X509自签名CA证书
 	cert, err := certutil.NewSelfSignedCACert(config.Config, key)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create self-signed CA certificate")
@@ -79,6 +82,7 @@ func NewCertificateAuthority(config *CertConfig) (*x509.Certificate, crypto.Sign
 }
 
 // NewCertAndKey creates new certificate and key by passing the certificate authority certificate and key
+// 创建私钥、证书，并由ca签名
 func NewCertAndKey(caCert *x509.Certificate, caKey crypto.Signer, config *CertConfig) (*x509.Certificate, crypto.Signer, error) {
 	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
 	if err != nil {
@@ -181,6 +185,7 @@ func WriteCSR(csrDir, name string, csr *x509.CertificateRequest) error {
 }
 
 // WritePublicKey stores the given public key at the given location
+//  从
 func WritePublicKey(pkiPath, name string, key crypto.PublicKey) error {
 	if key == nil {
 		return errors.New("public key cannot be nil when writing to file")
@@ -199,7 +204,9 @@ func WritePublicKey(pkiPath, name string, key crypto.PublicKey) error {
 }
 
 // CertOrKeyExist returns a boolean whether the cert or the key exists
+//  检测是否指定证书或私钥至少有一个存在
 func CertOrKeyExist(pkiPath, name string) bool {
+	// 返回证书和私钥文件路径
 	certificatePath, privateKeyPath := PathsForCertAndKey(pkiPath, name)
 
 	_, certErr := os.Stat(certificatePath)
@@ -225,6 +232,7 @@ func CSROrKeyExist(csrDir, name string) bool {
 }
 
 // TryLoadCertAndKeyFromDisk tries to load a cert and a key from the disk and validates that they are valid
+// 加载指定路径下证书和私钥
 func TryLoadCertAndKeyFromDisk(pkiPath, name string) (*x509.Certificate, crypto.Signer, error) {
 	cert, err := TryLoadCertFromDisk(pkiPath, name)
 	if err != nil {
@@ -240,6 +248,7 @@ func TryLoadCertAndKeyFromDisk(pkiPath, name string) (*x509.Certificate, crypto.
 }
 
 // TryLoadCertFromDisk tries to load the cert from the disk and validates that it is valid
+// 从指定路径加载证书文件，证书未激活或者已过期即报错
 func TryLoadCertFromDisk(pkiPath, name string) (*x509.Certificate, error) {
 	certificatePath := pathForCert(pkiPath, name)
 
@@ -335,6 +344,7 @@ func TryLoadPrivatePublicKeyFromDisk(pkiPath, name string) (*rsa.PrivateKey, *rs
 }
 
 // PathsForCertAndKey returns the paths for the certificate and key given the path and basename.
+// 返回证书和私钥文件路径
 func PathsForCertAndKey(pkiPath, name string) (string, string) {
 	return pathForCert(pkiPath, name), pathForKey(pkiPath, name)
 }
@@ -545,6 +555,7 @@ func EncodePublicKeyPEM(key crypto.PublicKey) ([]byte, error) {
 }
 
 // NewPrivateKey creates an RSA private key
+// 根据加密算法，生成密钥对(包含私钥和公钥)
 func NewPrivateKey(keyType x509.PublicKeyAlgorithm) (crypto.Signer, error) {
 	if keyType == x509.ECDSA {
 		return ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)

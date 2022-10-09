@@ -42,6 +42,7 @@ var (
 )
 
 // GenerateBootstrapToken generates a new, random Bootstrap Token.
+// 创建一个随机boostrap token字符串
 func GenerateBootstrapToken() (string, error) {
 	tokenID, err := randBytes(api.BootstrapTokenIDBytes)
 	if err != nil {

@@ -204,7 +204,7 @@ func GetEtcdPodSpec(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmapi.A
 	return staticpodutil.ComponentPod(
 		v1.Container{
 			Name:            kubeadmconstants.Etcd,
-			Command:         getEtcdCommand(cfg, endpoint, nodeName, initialCluster),
+			Command:         getEtcdCommand(cfg, endpoint, nodeName, initialCluster), //生成etcd目录
 			Image:           images.GetEtcdImage(cfg),
 			ImagePullPolicy: v1.PullIfNotPresent,
 			// Mount the etcd datadir path read-write so etcd can store data in a more persistent manner
@@ -234,7 +234,7 @@ func getEtcdCommand(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmapi.A
 		"listen-peer-urls":            etcdutil.GetPeerURL(endpoint),
 		"initial-advertise-peer-urls": etcdutil.GetPeerURL(endpoint),
 		"data-dir":                    cfg.Etcd.Local.DataDir,
-		"cert-file":                   filepath.Join(cfg.CertificatesDir, kubeadmconstants.EtcdServerCertName),
+		"cert-file":                   filepath.Join(cfg.CertificatesDir, kubeadmconstants.EtcdServerCertName), // 这些证书在cert阶段创建
 		"key-file":                    filepath.Join(cfg.CertificatesDir, kubeadmconstants.EtcdServerKeyName),
 		"trusted-ca-file":             filepath.Join(cfg.CertificatesDir, kubeadmconstants.EtcdCACertName),
 		"client-cert-auth":            "true",

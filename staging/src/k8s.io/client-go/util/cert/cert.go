@@ -35,7 +35,7 @@ import (
 	"k8s.io/client-go/util/keyutil"
 )
 
-const duration365d = time.Hour * 24 * 365
+const duration365d = time.Hour * 24 * 365 // 1年
 
 // Config contains the basic fields required for creating a certificate
 type Config struct {
@@ -54,25 +54,29 @@ type AltNames struct {
 }
 
 // NewSelfSignedCACert creates a CA certificate
+// 生成证书有效期为10年的X509自签名CA证书
 func NewSelfSignedCACert(cfg Config, key crypto.Signer) (*x509.Certificate, error) {
 	now := time.Now()
+	// 证书模板
 	tmpl := x509.Certificate{
-		SerialNumber: new(big.Int).SetInt64(0),
+		SerialNumber: new(big.Int).SetInt64(0), // 证书序列号, 签名机构唯一
 		Subject: pkix.Name{
 			CommonName:   cfg.CommonName,
 			Organization: cfg.Organization,
 		},
 		NotBefore:             now.UTC(),
-		NotAfter:              now.Add(duration365d * 10).UTC(),
+		NotAfter:              now.Add(duration365d * 10).UTC(), // CA证书有效期为10年
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA:                  true, //标记为CA证书
 	}
 
+	//利用证书生成x509 v3版本证书, 因为签名的父证书为证书自己，
 	certDERBytes, err := x509.CreateCertificate(cryptorand.Reader, &tmpl, &tmpl, key.Public(), key)
 	if err != nil {
 		return nil, err
 	}
+	// 将证书数据解码称证书对象
 	return x509.ParseCertificate(certDERBytes)
 }
 

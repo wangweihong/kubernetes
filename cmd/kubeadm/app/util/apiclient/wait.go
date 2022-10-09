@@ -74,6 +74,7 @@ func NewKubeWaiter(client clientset.Interface, timeout time.Duration, writer io.
 }
 
 // WaitForAPI waits for the API Server's /healthz endpoint to report "ok"
+// 访问apiserver直到超时或者有回应
 func (w *KubeWaiter) WaitForAPI() error {
 	start := time.Now()
 	return wait.PollImmediate(kubeadmconstants.APICallRetryInterval, w.timeout, func() (bool, error) {
@@ -156,9 +157,11 @@ func (w *KubeWaiter) WaitForHealthyKubelet(initialTimeout time.Duration, healthz
 
 // WaitForKubeletAndFunc waits primarily for the function f to execute, even though it might take some time. If that takes a long time, and the kubelet
 // /healthz continuously are unhealthy, kubeadm will error out after a period of exponential backoff
+// 等待kubelet或者指定组件直到超时或者有回应
 func (w *KubeWaiter) WaitForKubeletAndFunc(f func() error) error {
 	errorChan := make(chan error, 1)
 
+	// 访问kubelet /healthz接口, 直到超时或者有回应
 	go func(errC chan error, waiter Waiter) {
 		if err := waiter.WaitForHealthyKubelet(40*time.Second, fmt.Sprintf("http://localhost:%d/healthz", kubeadmconstants.KubeletHealthzPort)); err != nil {
 			errC <- err

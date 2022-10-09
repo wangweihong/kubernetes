@@ -51,12 +51,13 @@ type tokenAuth struct {
 }
 
 // kubeConfigSpec struct holds info required to build a KubeConfig object
+// TokenAuth
 type kubeConfigSpec struct {
-	CACert         *x509.Certificate
+	CACert         *x509.Certificate // ca证书
 	APIServer      string
 	ClientName     string
-	TokenAuth      *tokenAuth
-	ClientCertAuth *clientCertAuth
+	TokenAuth      *tokenAuth      // 如果kubeconfig使用token验证(如bootstrap token)时设置
+	ClientCertAuth *clientCertAuth // 如果kubeconfig使用客户端证书时设置
 }
 
 // CreateJoinControlPlaneKubeConfigFiles will create and write to disk the kubeconfig files required by kubeadm
@@ -91,6 +92,7 @@ func CreateJoinControlPlaneKubeConfigFiles(outDir string, cfg *kubeadmapi.InitCo
 
 // CreateKubeConfigFile creates a kubeconfig file.
 // If the kubeconfig file already exists, it is used only if evaluated equal; otherwise an error is returned.
+// 创建指定组件的kubeconfig文件
 func CreateKubeConfigFile(kubeConfigFileName string, outDir string, cfg *kubeadmapi.InitConfiguration) error {
 	klog.V(1).Infof("creating kubeconfig file for %s", kubeConfigFileName)
 	return createKubeConfigFiles(outDir, cfg, kubeConfigFileName)
@@ -98,9 +100,11 @@ func CreateKubeConfigFile(kubeConfigFileName string, outDir string, cfg *kubeadm
 
 // createKubeConfigFiles creates all the requested kubeconfig files.
 // If kubeconfig files already exists, they are used only if evaluated equal; otherwise an error is returned.
+// 创建指定组件的kubeconfig文件
 func createKubeConfigFiles(outDir string, cfg *kubeadmapi.InitConfiguration, kubeConfigFileNames ...string) error {
 
 	// gets the KubeConfigSpecs, actualized for the current InitConfiguration
+	// 生成admin.conf,scheduler.conf,kubelet.conf,control-manager.conf等kubeconf模板
 	specs, err := getKubeConfigSpecs(cfg)
 	if err != nil {
 		return err
@@ -114,12 +118,14 @@ func createKubeConfigFiles(outDir string, cfg *kubeadmapi.InitConfiguration, kub
 		}
 
 		// builds the KubeConfig object
+		// 基于kubeconfigSpec创建kubeconfig对象。如果是客户端证书验证方式，则基于CA创建私钥，签名证书，填充到client auth部分
 		config, err := buildKubeConfigFromSpec(spec, cfg.ClusterName)
 		if err != nil {
 			return err
 		}
 
 		// writes the kubeconfig to disk if it not exists
+		// 如果指定路径kubeconfig配置文件存在, 则比对新的数据。否则写入kubeconfig配置到指定路径
 		if err = createKubeConfigFileIfNotExists(outDir, kubeConfigFileName, config); err != nil {
 			return err
 		}
@@ -130,18 +136,21 @@ func createKubeConfigFiles(outDir string, cfg *kubeadmapi.InitConfiguration, kub
 
 // getKubeConfigSpecs returns all KubeConfigSpecs actualized to the context of the current InitConfiguration
 // NB. this methods holds the information about how kubeadm creates kubeconfig files.
+// 生成admin.conf,scheduler.conf,kubelet.conf,control-manager.conf等kubeconf模板
 func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConfigSpec, error) {
-
+	// 加载/etc/kubernetes/pki/ca.crt
 	caCert, caKey, err := pkiutil.TryLoadCertAndKeyFromDisk(cfg.CertificatesDir, kubeadmconstants.CACertAndKeyBaseName)
 	if err != nil {
 		return nil, errors.Wrap(err, "couldn't create a kubeconfig; the CA files couldn't be loaded")
 	}
 
+	// 获取k8s集群的访问端点
 	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return nil, err
 	}
 
+	//生成admin.conf,scheduler.conf,controller-manager.conf,kubelet.conf
 	var kubeConfigSpec = map[string]*kubeConfigSpec{
 		kubeadmconstants.AdminKubeConfigFileName: {
 			CACert:     caCert,
@@ -183,11 +192,13 @@ func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConf
 }
 
 // buildKubeConfigFromSpec creates a kubeconfig object for the given kubeConfigSpec
+// 基于kubeconfigSpec创建kubeconfig对象。如果是客户端证书验证方式，则基于CA创建私钥，签名证书，填充到client auth部分
 func buildKubeConfigFromSpec(spec *kubeConfigSpec, clustername string) (*clientcmdapi.Config, error) {
-
+	// 如果kubeconfig使用了token验证(如bootstrap kubeconfig)
 	// If this kubeconfig should use token
 	if spec.TokenAuth != nil {
 		// create a kubeconfig with a token
+		// 不需要填充客户端证书
 		return kubeconfigutil.CreateWithToken(
 			spec.APIServer,
 			clustername,
@@ -196,7 +207,7 @@ func buildKubeConfigFromSpec(spec *kubeConfigSpec, clustername string) (*clientc
 			spec.TokenAuth.Token,
 		), nil
 	}
-
+	// 客户端证书验证方式
 	// otherwise, create a client certs
 	clientCertConfig := pkiutil.CertConfig{
 		Config: certutil.Config{
@@ -205,16 +216,19 @@ func buildKubeConfigFromSpec(spec *kubeConfigSpec, clustername string) (*clientc
 			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		},
 	}
+	// 创建客户端私钥、证书，并由ca签名
 	clientCert, clientKey, err := pkiutil.NewCertAndKey(spec.CACert, spec.ClientCertAuth.CAKey, &clientCertConfig)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failure while creating %s client certificate", spec.ClientName)
 	}
 
+	//编码成PEM格式
 	encodedClientKey, err := keyutil.MarshalPrivateKeyToPEM(clientKey)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to marshal private key to PEM")
 	}
 	// create a kubeconfig with the client certs
+	// 创建clientcmdapi config对象,并设置客户端证书和私钥
 	return kubeconfigutil.CreateWithCerts(
 		spec.APIServer,
 		clustername,
@@ -226,6 +240,7 @@ func buildKubeConfigFromSpec(spec *kubeConfigSpec, clustername string) (*clientc
 }
 
 // validateKubeConfig check if the kubeconfig file exist and has the expected CA and server URL
+// 加载指定的outDir/filename下的kubeconfig配置,并和config中的server地址、ca证书进行比对
 func validateKubeConfig(outDir, filename string, config *clientcmdapi.Config) error {
 	kubeConfigFilePath := filepath.Join(outDir, filename)
 
@@ -239,6 +254,7 @@ func validateKubeConfig(outDir, filename string, config *clientcmdapi.Config) er
 		return errors.Wrapf(err, "failed to load kubeconfig file %s that already exists on disk", kubeConfigFilePath)
 	}
 
+	// 找到指定配置中currentContext里的集群地址和
 	expectedCtx, exists := config.Contexts[config.CurrentContext]
 	if !exists {
 		return errors.Errorf("failed to find expected context %s", config.CurrentContext)
@@ -275,9 +291,11 @@ func validateKubeConfig(outDir, filename string, config *clientcmdapi.Config) er
 // If there already is a kubeconfig file at the given path; kubeadm tries to load it and check if the values in the
 // existing and the expected config equals. If they do; kubeadm will just skip writing the file as it's up-to-date,
 // but if a file exists but has old content or isn't a kubeconfig file, this function returns an error.
+// 如果指定路径kubeconfig配置文件存在, 则比对新的数据。否则写入kubeconfig配置到指定路径
 func createKubeConfigFileIfNotExists(outDir, filename string, config *clientcmdapi.Config) error {
 	kubeConfigFilePath := filepath.Join(outDir, filename)
 
+	// 加载指定的outDir/filename下的kubeconfig配置,并和config中的server地址、ca证书进行比对
 	err := validateKubeConfig(outDir, filename, config)
 	if err != nil {
 		// Check if the file exist, and if it doesn't, just write it to disk
@@ -372,6 +390,7 @@ func writeKubeConfigFromSpec(out io.Writer, spec *kubeConfigSpec, clustername st
 }
 
 // ValidateKubeconfigsForExternalCA check if the kubeconfig file exist and has the expected CA and server URL using kubeadmapi.InitConfiguration.
+// 检测kubeconfig配置是否指定了正确的外部CA证书
 func ValidateKubeconfigsForExternalCA(outDir string, cfg *kubeadmapi.InitConfiguration) error {
 	kubeConfigFileNames := []string{
 		kubeadmconstants.AdminKubeConfigFileName,
@@ -382,19 +401,22 @@ func ValidateKubeconfigsForExternalCA(outDir string, cfg *kubeadmapi.InitConfigu
 
 	// Creates a kubeconfig file with the target CA and server URL
 	// to be used as a input for validating user provided kubeconfig files
+	// 加载/etc/kubernetes/pki/ca.crt CA证书
 	caCert, err := pkiutil.TryLoadCertFromDisk(cfg.CertificatesDir, kubeadmconstants.CACertAndKeyBaseName)
 	if err != nil {
 		return errors.Wrapf(err, "the CA file couldn't be loaded")
 	}
-
+	// 找到k8s集群访问端点
 	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return err
 	}
 
+	// 创建一个通用的clientcmdapi config结构体, 设置服务地址和ca证书
 	validationConfig := kubeconfigutil.CreateBasic(controlPlaneEndpoint, "dummy", "dummy", pkiutil.EncodeCertPEM(caCert))
 
 	// validate user provided kubeconfig files
+	// 检测这些kubeconfig配置文件的集群和证书是否椅子和
 	for _, kubeConfigFileName := range kubeConfigFileNames {
 		if err = validateKubeConfig(outDir, kubeConfigFileName, validationConfig); err != nil {
 			return errors.Wrapf(err, "the %s file does not exists or it is not valid", kubeConfigFileName)

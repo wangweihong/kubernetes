@@ -31,11 +31,12 @@ import (
 type configMutatorsFunc func(*kubeadmapi.InitConfiguration, *pkiutil.CertConfig) error
 
 // KubeadmCert represents a certificate that Kubeadm will create to function properly.
+// 用来表示kubeadm要创建的证书
 type KubeadmCert struct {
 	Name     string
 	LongName string
 	BaseName string
-	CAName   string
+	CAName   string //签名的CA, 如果是CA证书则为空, 执行创建CA证书流程，否则执行普通证书流程。 CA证书该项必须为空
 	// Some attributes will depend on the InitConfiguration, only known at runtime.
 	// These functions will be run in series, passed both the InitConfiguration and a cert Config.
 	configMutators []configMutatorsFunc
@@ -55,15 +56,18 @@ func (k *KubeadmCert) GetConfig(ic *kubeadmapi.InitConfiguration) (*pkiutil.Cert
 }
 
 // CreateFromCA makes and writes a certificate using the given CA cert and key.
+// 指定指定的CA创建新证书和私钥
 func (k *KubeadmCert) CreateFromCA(ic *kubeadmapi.InitConfiguration, caCert *x509.Certificate, caKey crypto.Signer) error {
 	cfg, err := k.GetConfig(ic)
 	if err != nil {
 		return errors.Wrapf(err, "couldn't create %q certificate", k.Name)
 	}
+	// 创建私钥, 基于CA颁发新证书
 	cert, key, err := pkiutil.NewCertAndKey(caCert, caKey, cfg)
 	if err != nil {
 		return err
 	}
+	// 如果证书、私钥存在, 则校验证书是不是有signingCert签名。否则生成证书和私钥
 	err = writeCertificateFilesIfNotExist(
 		ic.CertificatesDir,
 		k.BaseName,
@@ -205,6 +209,7 @@ func (c Certificates) AsMap() CertificateMap {
 }
 
 // GetDefaultCertList returns  all of the certificates kubeadm requires to function.
+// 返回kubeadm要创建的证书列表
 func GetDefaultCertList() Certificates {
 	return Certificates{
 		&KubeadmCertRootCA,

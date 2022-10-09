@@ -28,8 +28,10 @@ import (
 )
 
 // NewBootstrapTokenOptions creates a new BootstrapTokenOptions object with the default values
+// 创建默认配置的bootstrap token选项
 func NewBootstrapTokenOptions() *BootstrapTokenOptions {
 	bto := &BootstrapTokenOptions{&kubeadmapiv1beta2.BootstrapToken{}, ""}
+	//设置自举token选项默认值
 	kubeadmapiv1beta2.SetDefaults_BootstrapToken(bto.BootstrapToken)
 	return bto
 }

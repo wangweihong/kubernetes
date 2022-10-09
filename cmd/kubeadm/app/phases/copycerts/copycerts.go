@@ -76,6 +76,7 @@ func createShortLivedBootstrapToken(client clientset.Interface) (string, error) 
 }
 
 //CreateCertificateKey returns a cryptographically secure random key
+// 生成随机32位字节密钥
 func CreateCertificateKey() (string, error) {
 	randBytes, err := cryptoutil.CreateRandBytes(kubeadmconstants.CertificateKeySize)
 	if err != nil {
@@ -87,15 +88,19 @@ func CreateCertificateKey() (string, error) {
 //UploadCerts save certs needs to join a new control-plane on kubeadm-certs sercret.
 func UploadCerts(client clientset.Interface, cfg *kubeadmapi.InitConfiguration, key string) error {
 	fmt.Printf("[upload-certs] Storing the certificates in Secret %q in the %q Namespace\n", kubeadmconstants.KubeadmCertsSecret, metav1.NamespaceSystem)
+	// 该key用来aes加密使用
 	decodedKey, err := hex.DecodeString(key)
 	if err != nil {
 		return errors.Wrap(err, "error decoding certificate key")
 	}
+
+	// 创建一个随机boostrap token字符串
 	tokenID, err := createShortLivedBootstrapToken(client)
 	if err != nil {
 		return err
 	}
 
+	//从文件中加载ca,front-proxy0ca,etcd-ca等ca证书和私钥, 并且使用AES加密
 	secretData, err := getDataFromDisk(cfg, decodedKey)
 	if err != nil {
 		return err
@@ -105,6 +110,7 @@ func UploadCerts(client clientset.Interface, cfg *kubeadmapi.InitConfiguration, 
 		return err
 	}
 
+	//创建kubeadm-certs secret保存ca,front-proxy,etcd证书
 	err = apiclient.CreateOrUpdateSecret(client, &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            kubeadmconstants.KubeadmCertsSecret,
@@ -120,9 +126,11 @@ func UploadCerts(client clientset.Interface, cfg *kubeadmapi.InitConfiguration, 
 	return createRBAC(client)
 }
 
+// 创建一个可以访问kubeadm-certs secret的role,以及将该role和system:bootstrappers:kubeadm:default-node-token绑定在一起
 func createRBAC(client clientset.Interface) error {
 	err := apiclient.CreateOrUpdateRole(client, &rbac.Role{
 		ObjectMeta: metav1.ObjectMeta{
+			// kubeadm:kubeadm-certs
 			Name:      kubeadmconstants.KubeadmCertsClusterRoleName,
 			Namespace: metav1.NamespaceSystem,
 		},
@@ -170,6 +178,7 @@ func getSecretOwnerRef(client clientset.Interface, tokenID string) ([]metav1.Own
 	return []metav1.OwnerReference{*ref}, nil
 }
 
+// 加载指定文件，并对内容进行aes加密
 func loadAndEncryptCert(certPath string, key []byte) ([]byte, error) {
 	cert, err := ioutil.ReadFile(certPath)
 	if err != nil {
@@ -201,9 +210,12 @@ func certsToTransfer(cfg *kubeadmapi.InitConfiguration) map[string]string {
 	return certs
 }
 
+//从文件中加载ca,front-proxy0ca,etcd-ca等ca证书和私钥, 并且使用AES加密
 func getDataFromDisk(cfg *kubeadmapi.InitConfiguration, key []byte) (map[string][]byte, error) {
 	secretData := map[string][]byte{}
+	//加载ca.crt/ca.key, front-proxy-ca.crt, etcd.crt/key等文件并解析
 	for certName, certPath := range certsToTransfer(cfg) {
+		// 加载指定文件，并对内容使用key进行aes加密
 		cert, err := loadAndEncryptCert(certPath, key)
 		if err == nil || os.IsNotExist(err) {
 			secretData[certOrKeyNameToSecretName(certName)] = cert

@@ -27,6 +27,7 @@ import (
 // BuildArgumentListFromMap takes two string-string maps, one with the base arguments and one
 // with optional override arguments. In the return list override arguments will precede base
 // arguments
+// 合并baseArguments和overrideArguments表, 然后转换成参数列表
 func BuildArgumentListFromMap(baseArguments map[string]string, overrideArguments map[string]string) []string {
 	var command []string
 	var keys []string

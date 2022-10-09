@@ -44,6 +44,7 @@ func CreateInitStaticPodManifestFiles(manifestDir, kustomizeDir string, cfg *kub
 
 // GetStaticPodSpecs returns all staticPodSpecs actualized to the context of the current configuration
 // NB. this methods holds the information about how kubeadm creates static pod manifests.
+// kube-apiserver,kube-controller-manager,kube-scheduler PodSpec
 func GetStaticPodSpecs(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmapi.APIEndpoint) map[string]v1.Pod {
 	// Get the required hostpath mounts
 	mounts := getHostPathVolumesForTheControlPlane(cfg)
@@ -54,7 +55,7 @@ func GetStaticPodSpecs(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmap
 			Name:            kubeadmconstants.KubeAPIServer,
 			Image:           images.GetKubernetesImage(kubeadmconstants.KubeAPIServer, cfg),
 			ImagePullPolicy: v1.PullIfNotPresent,
-			Command:         getAPIServerCommand(cfg, endpoint),
+			Command:         getAPIServerCommand(cfg, endpoint), //  apiserver运行时命令
 			VolumeMounts:    staticpodutil.VolumeMountMapToSlice(mounts.GetVolumeMounts(kubeadmconstants.KubeAPIServer)),
 			LivenessProbe:   staticpodutil.LivenessProbe(staticpodutil.GetAPIServerProbeAddress(endpoint), "/healthz", int(endpoint.BindPort), v1.URISchemeHTTPS),
 			Resources:       staticpodutil.ComponentResources("250m"),
@@ -65,7 +66,7 @@ func GetStaticPodSpecs(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmap
 			Name:            kubeadmconstants.KubeControllerManager,
 			Image:           images.GetKubernetesImage(kubeadmconstants.KubeControllerManager, cfg),
 			ImagePullPolicy: v1.PullIfNotPresent,
-			Command:         getControllerManagerCommand(cfg),
+			Command:         getControllerManagerCommand(cfg), // controller manager 运行时命令
 			VolumeMounts:    staticpodutil.VolumeMountMapToSlice(mounts.GetVolumeMounts(kubeadmconstants.KubeControllerManager)),
 			LivenessProbe:   staticpodutil.LivenessProbe(staticpodutil.GetControllerManagerProbeAddress(cfg), "/healthz", kubeadmconstants.KubeControllerManagerPort, v1.URISchemeHTTPS),
 			Resources:       staticpodutil.ComponentResources("200m"),
@@ -75,7 +76,7 @@ func GetStaticPodSpecs(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmap
 			Name:            kubeadmconstants.KubeScheduler,
 			Image:           images.GetKubernetesImage(kubeadmconstants.KubeScheduler, cfg),
 			ImagePullPolicy: v1.PullIfNotPresent,
-			Command:         getSchedulerCommand(cfg),
+			Command:         getSchedulerCommand(cfg), // scheduler运行时命令
 			VolumeMounts:    staticpodutil.VolumeMountMapToSlice(mounts.GetVolumeMounts(kubeadmconstants.KubeScheduler)),
 			LivenessProbe:   staticpodutil.LivenessProbe(staticpodutil.GetSchedulerProbeAddress(cfg), "/healthz", kubeadmconstants.KubeSchedulerPort, v1.URISchemeHTTPS),
 			Resources:       staticpodutil.ComponentResources("100m"),
@@ -86,9 +87,11 @@ func GetStaticPodSpecs(cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmap
 }
 
 // CreateStaticPodFiles creates all the requested static pod files.
+//在/etc/kubernetes/manifests中生成apiserver等组件static pod yaml
 func CreateStaticPodFiles(manifestDir, kustomizeDir string, cfg *kubeadmapi.ClusterConfiguration, endpoint *kubeadmapi.APIEndpoint, componentNames ...string) error {
 	// gets the StaticPodSpecs, actualized for the current ClusterConfiguration
 	klog.V(1).Infoln("[control-plane] getting StaticPodSpecs")
+	// kube-apiserver,kube-controller-manager,kube-scheduler PodSpec
 	specs := GetStaticPodSpecs(cfg, endpoint)
 
 	// creates required static pod specs
@@ -114,6 +117,7 @@ func CreateStaticPodFiles(manifestDir, kustomizeDir string, cfg *kubeadmapi.Clus
 		}
 
 		// writes the StaticPodSpec to disk
+		// 写到/etc/kubernetes/manifests下指定文件
 		if err := staticpodutil.WriteStaticPodToDisk(componentName, manifestDir, spec); err != nil {
 			return errors.Wrapf(err, "failed to create static pod manifest file for %q", componentName)
 		}

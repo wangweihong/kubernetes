@@ -72,6 +72,7 @@ func NewWaitControlPlanePhase() workflow.Phase {
 	return phase
 }
 
+// 等待kubelet/kube-apiserver健康
 func runWaitControlPlanePhase(c workflow.RunData) error {
 	data, ok := c.(InitData)
 	if !ok {
@@ -92,6 +93,7 @@ func runWaitControlPlanePhase(c workflow.RunData) error {
 	}
 
 	timeout := data.Cfg().ClusterConfiguration.APIServer.TimeoutForControlPlane.Duration
+	//
 	waiter, err := newControlPlaneWaiter(data.DryRun(), timeout, client, data.OutputWriter())
 	if err != nil {
 		return errors.Wrap(err, "error creating waiter")
@@ -99,6 +101,7 @@ func runWaitControlPlanePhase(c workflow.RunData) error {
 
 	fmt.Printf("[wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory %q. This can take up to %v\n", data.ManifestDir(), timeout)
 
+	// 等待kubelet/apiserver健康或者超时
 	if err := waiter.WaitForKubeletAndFunc(waiter.WaitForAPI); err != nil {
 		context := struct {
 			Error    string

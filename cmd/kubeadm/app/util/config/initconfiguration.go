@@ -196,6 +196,7 @@ func DefaultedInitConfiguration(versionedInitCfg *kubeadmapiv1beta2.InitConfigur
 }
 
 // LoadInitConfigurationFromFile loads a supported versioned InitConfiguration from a file, converts it into internal config, defaults it and verifies it.
+// 从文件加载kubeadm Init配置
 func LoadInitConfigurationFromFile(cfgPath string) (*kubeadmapi.InitConfiguration, error) {
 	klog.V(1).Infof("loading configuration from %q", cfgPath)
 
@@ -212,13 +213,15 @@ func LoadInitConfigurationFromFile(cfgPath string) (*kubeadmapi.InitConfiguratio
 // The external, versioned configuration is defaulted and converted to the internal type.
 // Right thereafter, the configuration is defaulted again with dynamic values (like IP addresses of a machine, etc)
 // Lastly, the internal config is validated and returned.
+// 如果指定了kubeadm配置文件则加载，否则采用默认配置
 func LoadOrDefaultInitConfiguration(cfgPath string, versionedInitCfg *kubeadmapiv1beta2.InitConfiguration, versionedClusterCfg *kubeadmapiv1beta2.ClusterConfiguration) (*kubeadmapi.InitConfiguration, error) {
+	// 指定了kubeadm config.
 	if cfgPath != "" {
 		// Loads configuration from config file, if provided
 		// Nb. --config overrides command line flags
 		return LoadInitConfigurationFromFile(cfgPath)
 	}
-
+	//  默认的Kubeadm init config
 	return DefaultedInitConfiguration(versionedInitCfg, versionedClusterCfg)
 }
 
@@ -226,6 +229,7 @@ func LoadOrDefaultInitConfiguration(cfgPath string, versionedInitCfg *kubeadmapi
 // The map may contain many different YAML documents. These YAML documents are parsed one-by-one
 // and well-known ComponentConfig GroupVersionKinds are stored inside of the internal InitConfiguration struct.
 // The resulting InitConfiguration is then dynamically defaulted and validated prior to return.
+// 解析字节流到kubeadm initConfiguration对象。 注意kubeadm config会包含多种GVK,不仅仅是InitConfiguration
 func BytesToInitConfiguration(b []byte) (*kubeadmapi.InitConfiguration, error) {
 	gvkmap, err := kubeadmutil.SplitYAMLDocuments(b)
 	if err != nil {
@@ -239,7 +243,7 @@ func BytesToInitConfiguration(b []byte) (*kubeadmapi.InitConfiguration, error) {
 func documentMapToInitConfiguration(gvkmap kubeadmapi.DocumentMap, allowDeprecated bool) (*kubeadmapi.InitConfiguration, error) {
 	var initcfg *kubeadmapi.InitConfiguration
 	var clustercfg *kubeadmapi.ClusterConfiguration
-
+	// kubeadm yaml包含多种gvk
 	for gvk, fileContent := range gvkmap {
 		// first, check if this GVK is supported and possibly not deprecated
 		if err := validateSupportedVersion(gvk.GroupVersion(), allowDeprecated); err != nil {
@@ -248,7 +252,7 @@ func documentMapToInitConfiguration(gvkmap kubeadmapi.DocumentMap, allowDeprecat
 
 		// verify the validity of the YAML
 		strict.VerifyUnmarshalStrict(fileContent, gvk)
-
+		// 解码 InitConfiguration GVK
 		if kubeadmutil.GroupVersionKindsHasInitConfiguration(gvk) {
 			// Set initcfg to an empty struct value the deserializer will populate
 			initcfg = &kubeadmapi.InitConfiguration{}
@@ -259,6 +263,7 @@ func documentMapToInitConfiguration(gvkmap kubeadmapi.DocumentMap, allowDeprecat
 			}
 			continue
 		}
+		// 解码 ClusterConfiguration GVK
 		if kubeadmutil.GroupVersionKindsHasClusterConfiguration(gvk) {
 			// Set clustercfg to an empty struct value the deserializer will populate
 			clustercfg = &kubeadmapi.ClusterConfiguration{}

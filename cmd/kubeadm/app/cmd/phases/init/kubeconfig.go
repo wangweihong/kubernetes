@@ -61,6 +61,7 @@ var (
 )
 
 // NewKubeConfigPhase creates a kubeadm workflow phase that creates all kubeconfig files necessary to establish the control plane and the admin kubeconfig file.
+// 生成kubeadm.conf,kubelet.conf,controller-manager.conf,scheduler.conf
 func NewKubeConfigPhase() workflow.Phase {
 	return workflow.Phase{
 		Name:  "kubeconfig",
@@ -73,9 +74,13 @@ func NewKubeConfigPhase() workflow.Phase {
 				InheritFlags:   getKubeConfigPhaseFlags("all"),
 				RunAllSiblings: true,
 			},
+			// 创建/etc/kubernetes/admin.conf
 			NewKubeConfigFilePhase(kubeadmconstants.AdminKubeConfigFileName),
+			// 创建/etc/kubernetes/kubelet.conf
 			NewKubeConfigFilePhase(kubeadmconstants.KubeletKubeConfigFileName),
+			// 创建/etc/kubernetes/controller-manager.conf
 			NewKubeConfigFilePhase(kubeadmconstants.ControllerManagerKubeConfigFileName),
+			// 创建/etc/kubernetes/scheduler.conf
 			NewKubeConfigFilePhase(kubeadmconstants.SchedulerKubeConfigFileName),
 		},
 		Run: runKubeConfig,
@@ -122,6 +127,8 @@ func runKubeConfig(c workflow.RunData) error {
 }
 
 // runKubeConfigFile executes kubeconfig creation logic.
+// admin.conf
+// 创建指定组件的kubeconfig文件
 func runKubeConfigFile(kubeConfigFileName string) func(workflow.RunData) error {
 	return func(c workflow.RunData) error {
 		data, ok := c.(InitData)
@@ -141,6 +148,7 @@ func runKubeConfigFile(kubeConfigFileName string) func(workflow.RunData) error {
 		defer func() { cfg.CertificatesDir = data.CertificateDir() }()
 
 		// creates the KubeConfig file (or use existing)
+		// 创建指定组件的kubeconfig文件
 		return kubeconfigphase.CreateKubeConfigFile(kubeConfigFileName, data.KubeConfigDir(), data.Cfg())
 	}
 }

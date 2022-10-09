@@ -25,6 +25,7 @@ import (
 )
 
 // CreateRandBytes returns a cryptographically secure slice of random bytes with a given size
+// 生成随机字节数，作为AES加解密KEY
 func CreateRandBytes(size uint32) ([]byte, error) {
 	bytes := make([]byte, size)
 	if _, err := rand.Read(bytes); err != nil {
@@ -35,6 +36,7 @@ func CreateRandBytes(size uint32) ([]byte, error) {
 
 // EncryptBytes takes a byte slice of raw data and an encryption key and returns an encrypted byte slice of data.
 // The key must be an AES key, either 16, 24, or 32 bytes to select AES-128, AES-192, or AES-256
+// AES加密
 func EncryptBytes(data, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -53,6 +55,7 @@ func EncryptBytes(data, key []byte) ([]byte, error) {
 
 // DecryptBytes takes a byte slice of encrypted data and an encryption key and returns a decrypted byte slice of data.
 // The key must be an AES key, either 16, 24, or 32 bytes to select AES-128, AES-192, or AES-256
+// AES解密
 func DecryptBytes(data, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

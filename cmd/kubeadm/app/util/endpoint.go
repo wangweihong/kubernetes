@@ -32,6 +32,9 @@ import (
 // - If the controlPlaneEndpoint is defined, use it.
 // - if the controlPlaneEndpoint is defined but without a port number, use the controlPlaneEndpoint + localEndpoint.BindPort is used.
 // - Otherwise, in case the controlPlaneEndpoint is not defined, use the localEndpoint.AdvertiseAddress + the localEndpoint.BindPort.
+// 获取集群控制面板访问端点IP
+// 在高可用负载环境下，k8s集群可能会采用VIP:ExternalPort的方式来作为集群的入口地址。通过controllerPathEndpoint来设置。
+// localEndpoint通常为当前节点上运行的apiserver的ip端口
 func GetControlPlaneEndpoint(controlPlaneEndpoint string, localEndpoint *kubeadmapi.APIEndpoint) (string, error) {
 	// parse the bind port
 	bindPortString := strconv.Itoa(int(localEndpoint.BindPort))

@@ -49,6 +49,7 @@ import (
 )
 
 // Config contains the data on how to authenticate a request to the Kube API Server
+// 验证器配置
 type Config struct {
 	Anonymous      bool
 	BasicAuthFile  string
@@ -64,7 +65,7 @@ type Config struct {
 	OIDCGroupsPrefix            string
 	OIDCSigningAlgs             []string
 	OIDCRequiredClaims          map[string]string
-	ServiceAccountKeyFiles      []string
+	ServiceAccountKeyFiles      []string // service account密钥文件(kubeadm为/etc/kubernetes/pki/sa.pub)
 	ServiceAccountLookup        bool
 	ServiceAccountIssuer        string
 	APIAudiences                authenticator.Audiences

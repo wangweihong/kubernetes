@@ -39,7 +39,7 @@ type kubeletFlagsOpts struct {
 	pauseImage               string
 	registerTaintsUsingFlags bool
 	execer                   utilsexec.Interface
-	isServiceActiveFunc      func(string) (bool, error)
+	isServiceActiveFunc      func(string) (bool, error) // 检测系统服务(如systemd)是否启动
 }
 
 // GetNodeNameAndHostname obtains the name for this Node using the following precedence
@@ -62,6 +62,7 @@ func GetNodeNameAndHostname(cfg *kubeadmapi.NodeRegistrationOptions) (string, st
 
 // WriteKubeletDynamicEnvFile writes an environment file with dynamic flags to the kubelet.
 // Used at "kubeadm init" and "kubeadm join" time.
+// 将kubelet运行时参数写到/var/lib/kubelet/kubeadm-flags.env
 func WriteKubeletDynamicEnvFile(cfg *kubeadmapi.ClusterConfiguration, nodeReg *kubeadmapi.NodeRegistrationOptions, registerTaintsUsingFlags bool, kubeletDir string) error {
 	flagOpts := kubeletFlagsOpts{
 		nodeRegOpts:              nodeReg,
@@ -69,6 +70,7 @@ func WriteKubeletDynamicEnvFile(cfg *kubeadmapi.ClusterConfiguration, nodeReg *k
 		pauseImage:               images.GetPauseImage(cfg),
 		registerTaintsUsingFlags: registerTaintsUsingFlags,
 		execer:                   utilsexec.New(),
+		// 检测systemd服务是否存在
 		isServiceActiveFunc: func(name string) (bool, error) {
 			initSystem, err := initsystem.GetInitSystem()
 			if err != nil {
@@ -78,9 +80,12 @@ func WriteKubeletDynamicEnvFile(cfg *kubeadmapi.ClusterConfiguration, nodeReg *k
 		},
 	}
 	stringMap := buildKubeletArgMap(flagOpts)
+	// 合并baseArguments和overrideArguments表, 然后转换成参数列表
 	argList := kubeadmutil.BuildArgumentListFromMap(stringMap, nodeReg.KubeletExtraArgs)
+	// 将参数列表转换成如`KUBELET_KUBEADM_ARGS="--cgroup-driver=systemd --network-plugin=cni --pod-infra-container-image=k8s.gcr.io/pause:3.2"`
 	envFileContent := fmt.Sprintf("%s=%q\n", constants.KubeletEnvFileVariableName, strings.Join(argList, " "))
 
+	// 将kubeletFlag配置写到/var/lib/kubelet/kubeadm-flags.env文件中
 	return writeKubeletFlagBytesToDisk([]byte(envFileContent), kubeletDir)
 }
 
@@ -129,7 +134,9 @@ func buildKubeletArgMapCommon(opts kubeletFlagsOpts) map[string]string {
 }
 
 // writeKubeletFlagBytesToDisk writes a byte slice down to disk at the specific location of the kubelet flag overrides file
+// 将kubeletFlag配置写到/var/lib/kubelet/kubeadm-flags.env文件中
 func writeKubeletFlagBytesToDisk(b []byte, kubeletDir string) error {
+	// /var/lib/kubelet/kubeadm-flags.env
 	kubeletEnvFilePath := filepath.Join(kubeletDir, constants.KubeletEnvFileName)
 	fmt.Printf("[kubelet-start] Writing kubelet environment file with flags to file %q\n", kubeletEnvFilePath)
 

@@ -69,7 +69,9 @@ func UploadConfiguration(cfg *kubeadmapi.InitConfiguration, client clientset.Int
 	// Prepare the ClusterConfiguration for upload
 	// The components store their config in their own ConfigMaps, then reset the .ComponentConfig struct;
 	// We don't want to mutate the cfg itself, so create a copy of it using .DeepCopy of it first
+	//复制kubeadm config中ClusterConfiguration中部分
 	clusterConfigurationToUpload := cfg.ClusterConfiguration.DeepCopy()
+	//清空组件配置
 	clusterConfigurationToUpload.ComponentConfigs = kubeadmapi.ComponentConfigMap{}
 
 	// Marshal the ClusterConfiguration into YAML
@@ -90,6 +92,7 @@ func UploadConfiguration(cfg *kubeadmapi.InitConfiguration, client clientset.Int
 		return err
 	}
 
+	// 上传到kube-system中kubeadm-config
 	err = apiclient.CreateOrMutateConfigMap(client, &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kubeadmconstants.KubeadmConfigConfigMap,
@@ -119,6 +122,7 @@ func UploadConfiguration(cfg *kubeadmapi.InitConfiguration, client clientset.Int
 		return err
 	}
 
+	// 创建role
 	// Ensure that the NodesKubeadmConfigClusterRoleName exists
 	err = apiclient.CreateOrUpdateRole(client, &rbac.Role{
 		ObjectMeta: metav1.ObjectMeta{
@@ -141,6 +145,7 @@ func UploadConfiguration(cfg *kubeadmapi.InitConfiguration, client clientset.Int
 	// Binds the NodesKubeadmConfigClusterRoleName to all the bootstrap tokens
 	// that are members of the system:bootstrappers:kubeadm:default-node-token group
 	// and to all nodes
+	// 创建role binding
 	return apiclient.CreateOrUpdateRoleBinding(client, &rbac.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      NodesKubeadmConfigClusterRoleName,

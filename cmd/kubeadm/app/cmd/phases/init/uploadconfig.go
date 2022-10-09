@@ -100,6 +100,7 @@ func getUploadConfigPhaseFlags() []string {
 
 // runUploadKubeadmConfig uploads the kubeadm configuration to a ConfigMap
 func runUploadKubeadmConfig(c workflow.RunData) error {
+	// 获取/etc/kubernetes/admin.conf以及该配置生成的客户端
 	cfg, client, err := getUploadConfigData(c)
 	if err != nil {
 		return err
@@ -131,6 +132,7 @@ func runUploadKubeletConfig(c workflow.RunData) error {
 	return nil
 }
 
+// 集群初始化集群配置，集群访问客户端
 func getUploadConfigData(c workflow.RunData) (*kubeadmapi.InitConfiguration, clientset.Interface, error) {
 	data, ok := c.(InitData)
 	if !ok {
