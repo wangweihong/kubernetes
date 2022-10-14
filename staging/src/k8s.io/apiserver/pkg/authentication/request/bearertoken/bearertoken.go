@@ -24,6 +24,7 @@ import (
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 )
 
+// token 验证器
 type Authenticator struct {
 	auth authenticator.Token
 }
@@ -34,6 +35,7 @@ func New(auth authenticator.Token) *Authenticator {
 
 var invalidToken = errors.New("invalid bearer token")
 
+// 从http请求头中提取出token, 交由token验证器验证后，返回验证结果
 func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
 	auth := strings.TrimSpace(req.Header.Get("Authorization"))
 	if auth == "" {
@@ -50,7 +52,7 @@ func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.R
 	if len(token) == 0 {
 		return nil, false, nil
 	}
-
+	//验证token是否合法，token验证器包括:bootstrap token,service token, 通过--token-file指定的bearer token. oidc token
 	resp, ok, err := a.auth.AuthenticateToken(req.Context(), token)
 	// if we authenticated successfully, go ahead and remove the bearer token so that no one
 	// is ever tempted to use it inside of the API server

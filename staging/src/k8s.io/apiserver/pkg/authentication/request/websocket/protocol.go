@@ -54,6 +54,7 @@ func (a *ProtocolAuthenticator) AuthenticateRequest(req *http.Request) (*authent
 	token := ""
 	sawTokenProtocol := false
 	filteredProtocols := []string{}
+	// 从请求头Sec-WebSocket-Protocol协议头中提取协议请求头，在从协议头里提取base64url.bearer.authorization.k8s.io.
 	for _, protocolHeader := range req.Header[protocolHeader] {
 		for _, protocol := range strings.Split(protocolHeader, ",") {
 			protocol = strings.TrimSpace(protocol)

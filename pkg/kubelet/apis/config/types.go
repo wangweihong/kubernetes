@@ -76,13 +76,13 @@ type KubeletConfiguration struct {
 
 	// staticPodPath is the path to the directory containing local (static) pods to
 	// run, or the path to a single static pod file.
-	StaticPodPath string
+	StaticPodPath string //静态Pod路径 默认/etc/kubernetes/manifests
 	// syncFrequency is the max period between synchronizing running
 	// containers and config
 	SyncFrequency metav1.Duration
 	// fileCheckFrequency is the duration between checking config files for
 	// new data
-	FileCheckFrequency metav1.Duration
+	FileCheckFrequency metav1.Duration //静态文件更新检测频率
 	// httpCheckFrequency is the duration between checking http for new data
 	HTTPCheckFrequency metav1.Duration
 	// staticPodURL is the URL for accessing static pods to run

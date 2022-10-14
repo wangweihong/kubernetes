@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
@@ -44,28 +43,29 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/auth/authenticator/token/bootstrap"
 )
 
+//内置验证相关选项
 type BuiltInAuthenticationOptions struct {
 	APIAudiences    []string
-	Anonymous       *AnonymousAuthenticationOptions
-	BootstrapToken  *BootstrapTokenAuthenticationOptions
-	ClientCert      *genericoptions.ClientCertAuthenticationOptions //客户端证书验证方式
-	OIDC            *OIDCAuthenticationOptions
-	PasswordFile    *PasswordFileAuthenticationOptions
-	RequestHeader   *genericoptions.RequestHeaderAuthenticationOptions
+	Anonymous       *AnonymousAuthenticationOptions                    // 匿名访问认证选项
+	BootstrapToken  *BootstrapTokenAuthenticationOptions               // bootstrap token认证选项
+	ClientCert      *genericoptions.ClientCertAuthenticationOptions    // 客户端证书验证方式选项
+	OIDC            *OIDCAuthenticationOptions                         // oidc认证方式选项
+	PasswordFile    *PasswordFileAuthenticationOptions                 // 用户密码验证选项
+	RequestHeader   *genericoptions.RequestHeaderAuthenticationOptions // http请求头部验证方式选项
 	ServiceAccounts *ServiceAccountAuthenticationOptions
 	TokenFile       *TokenFileAuthenticationOptions
 	WebHook         *WebHookAuthenticationOptions // webhook验证方式
 
-	TokenSuccessCacheTTL time.Duration
-	TokenFailureCacheTTL time.Duration
+	TokenSuccessCacheTTL time.Duration // 默认为10秒
+	TokenFailureCacheTTL time.Duration // 默认为0秒
 }
 
 type AnonymousAuthenticationOptions struct {
-	Allow bool
+	Allow bool // 由参数--anonymous-auth来指定, 是否支持匿名访问
 }
 
 type BootstrapTokenAuthenticationOptions struct {
-	Enable bool
+	Enable bool // 由参数--enable-bootstrap-token-auth来指定是否支持bootstrap token
 }
 
 type OIDCAuthenticationOptions struct {
@@ -81,23 +81,23 @@ type OIDCAuthenticationOptions struct {
 }
 
 type PasswordFileAuthenticationOptions struct {
-	BasicAuthFile string
+	BasicAuthFile string // --basic-auth-file指定。已标记废弃。 如果指定则利用http请求中的basic auth进行认证
 }
 
 type ServiceAccountAuthenticationOptions struct {
-	KeyFiles      []string
-	Lookup        bool
-	Issuer        string
-	JWKSURI       string
-	MaxExpiration time.Duration
+	KeyFiles      []string      // --service-account-key-file
+	Lookup        bool          // --service-account-lookup
+	Issuer        string        // --service-account-issuer
+	JWKSURI       string        // --service-account-jwks-uri
+	MaxExpiration time.Duration // --service-account-max-token-expiration
 }
 
 type TokenFileAuthenticationOptions struct {
-	TokenFile string
+	TokenFile string // --token-auth-file来指定。 文件用来存放bearer token信息
 }
 
 type WebHookAuthenticationOptions struct {
-	ConfigFile string
+	ConfigFile string // --authentication-token-webhook-config-file, webhook验证配置文件
 	Version    string
 	CacheTTL   time.Duration
 }
@@ -109,6 +109,7 @@ func NewBuiltInAuthenticationOptions() *BuiltInAuthenticationOptions {
 	}
 }
 
+// 初始化认证系统相关选项
 func (s *BuiltInAuthenticationOptions) WithAll() *BuiltInAuthenticationOptions {
 	return s.
 		WithAnonymous().
@@ -235,6 +236,7 @@ func (s *BuiltInAuthenticationOptions) AddFlags(fs *pflag.FlagSet) {
 			"namespace to be used for TLS bootstrapping authentication.")
 	}
 
+	// 客户端ca证书
 	if s.ClientCert != nil {
 		s.ClientCert.AddFlags(fs)
 	}
@@ -364,6 +366,7 @@ func (s *BuiltInAuthenticationOptions) ToAuthenticationConfig() (kubeauthenticat
 		ret.BootstrapToken = s.BootstrapToken.Enable
 	}
 
+	// 如果指定了--client-ca-file
 	if s.ClientCert != nil {
 		var err error
 		ret.ClientCAContentProvider, err = s.ClientCert.GetClientCAContentProvider()
@@ -438,6 +441,7 @@ func (o *BuiltInAuthenticationOptions) ApplyTo(authInfo *genericapiserver.Authen
 		return errors.New("uninitialized OpenAPIConfig")
 	}
 
+	// 验证器配置
 	authenticatorConfig, err := o.ToAuthenticationConfig()
 	if err != nil {
 		return err
@@ -469,6 +473,8 @@ func (o *BuiltInAuthenticationOptions) ApplyTo(authInfo *genericapiserver.Authen
 			versionedInformer.Core().V1().Pods().Lister(),
 		)
 	}
+
+	// bootstrap 验证器。用于验证bootstrap token
 	authenticatorConfig.BootstrapTokenAuthenticator = bootstrap.NewTokenAuthenticator(
 		versionedInformer.Core().V1().Secrets().Lister().Secrets(metav1.NamespaceSystem),
 	)
@@ -481,6 +487,7 @@ func (o *BuiltInAuthenticationOptions) ApplyTo(authInfo *genericapiserver.Authen
 		authenticatorConfig.CustomDial = egressDialer
 	}
 
+	// 基于验证器配置初始验证器
 	authInfo.Authenticator, openAPIConfig.SecurityDefinitions, err = authenticatorConfig.New()
 	if err != nil {
 		return err

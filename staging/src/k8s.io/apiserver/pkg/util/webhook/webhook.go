@@ -40,7 +40,7 @@ const defaultRequestTimeout = 30 * time.Second
 // GenericWebhook defines a generic client for webhooks with commonly used capabilities,
 // such as retry requests.
 type GenericWebhook struct {
-	RestClient     *rest.RESTClient
+	RestClient     *rest.RESTClient //
 	InitialBackoff time.Duration
 	ShouldRetry    func(error) bool
 }
@@ -72,7 +72,7 @@ func newGenericWebhook(scheme *runtime.Scheme, codecFactory serializer.CodecFact
 			return nil, fmt.Errorf("webhook plugin requires enabling extension resource: %s", groupVersion)
 		}
 	}
-
+	//加载kubeconfig配置
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	loadingRules.ExplicitPath = kubeConfigFile
 	loader := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{})

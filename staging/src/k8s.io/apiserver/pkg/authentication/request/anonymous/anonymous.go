@@ -29,13 +29,14 @@ const (
 	unauthenticatedGroup = user.AllUnauthenticated
 )
 
+// 匿名用户验证器
 func NewAuthenticator() authenticator.Request {
 	return authenticator.RequestFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
 		auds, _ := authenticator.AudiencesFrom(req.Context())
 		return &authenticator.Response{
 			User: &user.DefaultInfo{
-				Name:   anonymousUser,
-				Groups: []string{unauthenticatedGroup},
+				Name:   anonymousUser,                  //system:anonymous 匿名用户用户名
+				Groups: []string{unauthenticatedGroup}, //system:unauthenticated 未验证用户组
 			},
 			Audiences: auds,
 		}, true, nil

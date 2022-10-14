@@ -139,9 +139,9 @@ type ExtraConfig struct {
 
 	// Values to build the IP addresses used by discovery
 	// The range of IPs to be assigned to services with type=ClusterIP or greater
-	ServiceIPRange net.IPNet
+	ServiceIPRange net.IPNet //服务网段范围。不指定默认为10.0.0.0/24
 	// The IP address for the GenericAPIServer service (must be inside ServiceIPRange)
-	APIServerServiceIP net.IP
+	APIServerServiceIP net.IP // apiserver服务IP, 通常为服务网段ServiceIPRanger第一个IP
 
 	// dual stack services, the range represents an alternative IP range for service IP
 	// must be of different family than primary (ServiceIPRange)

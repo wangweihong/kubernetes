@@ -44,10 +44,10 @@ type Info interface {
 // DefaultInfo provides a simple user information exchange object
 // for components that implement the UserInfo interface.
 type DefaultInfo struct {
-	Name   string
+	Name   string //用户名
 	UID    string
-	Groups []string
-	Extra  map[string][]string
+	Groups []string            //用户组
+	Extra  map[string][]string //额外信息
 }
 
 func (i *DefaultInfo) GetName() string {
@@ -70,10 +70,10 @@ func (i *DefaultInfo) GetExtra() map[string][]string {
 const (
 	SystemPrivilegedGroup = "system:masters"
 	NodesGroup            = "system:nodes"
-	AllUnauthenticated    = "system:unauthenticated"
-	AllAuthenticated      = "system:authenticated"
+	AllUnauthenticated    = "system:unauthenticated" // 匿名用户将自动设置为该组
+	AllAuthenticated      = "system:authenticated"   //已验证成功用户将添加到该组
 
-	Anonymous     = "system:anonymous"
+	Anonymous     = "system:anonymous" //匿名用户
 	APIServerUser = "system:apiserver"
 
 	// core kubernetes process identities

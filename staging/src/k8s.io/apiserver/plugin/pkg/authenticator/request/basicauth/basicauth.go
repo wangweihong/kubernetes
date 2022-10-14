@@ -29,6 +29,7 @@ type Authenticator struct {
 }
 
 // New returns a request authenticator that validates credentials using the provided password authenticator
+// 创建的密码验证器
 func New(auth authenticator.Password) *Authenticator {
 	return &Authenticator{auth}
 }
@@ -37,11 +38,13 @@ var errInvalidAuth = errors.New("invalid username/password combination")
 
 // AuthenticateRequest authenticates the request using the "Authorization: Basic" header in the request
 func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+	//从http请求头部来获取传递过来的用户名和密码
 	username, password, found := req.BasicAuth()
 	if !found {
 		return nil, false, nil
 	}
 
+	//检测用户是否在
 	resp, ok, err := a.auth.AuthenticatePassword(req.Context(), username, password)
 
 	// If the password authenticator didn't error, provide a default error

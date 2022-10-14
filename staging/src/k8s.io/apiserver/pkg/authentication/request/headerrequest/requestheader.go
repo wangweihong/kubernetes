@@ -52,16 +52,17 @@ func (s StaticStringSlice) Value() []string {
 	return s
 }
 
+// http请求头相关授权字段
 type requestHeaderAuthRequestHandler struct {
 	// nameHeaders are the headers to check (in order, case-insensitively) for an identity. The first header with a value wins.
-	nameHeaders StringSliceProvider
+	nameHeaders StringSliceProvider // 返回http头部中用户相关的key
 
 	// groupHeaders are the headers to check (case-insensitively) for group membership.  All values of all headers will be added.
-	groupHeaders StringSliceProvider
+	groupHeaders StringSliceProvider // 返回http头部中用户组相关的key
 
 	// extraHeaderPrefixes are the head prefixes to check (case-insensitively) for filling in
 	// the user.Info.Extra.  All values of all matching headers will be added.
-	extraHeaderPrefixes StringSliceProvider
+	extraHeaderPrefixes StringSliceProvider // 返回http头部一些额外信息的key
 }
 
 func New(nameHeaders, groupHeaders, extraHeaderPrefixes []string) (authenticator.Request, error) {
@@ -149,16 +150,20 @@ func NewSecure(clientCA string, proxyClientNames []string, nameHeaders []string,
 }
 
 func NewDynamicVerifyOptionsSecure(verifyOptionFn x509request.VerifyOptionFunc, proxyClientNames, nameHeaders, groupHeaders, extraHeaderPrefixes StringSliceProvider) authenticator.Request {
+	//创建http头部验证器
 	headerAuthenticator := NewDynamic(nameHeaders, groupHeaders, extraHeaderPrefixes)
 
 	return x509request.NewDynamicCAVerifier(verifyOptionFn, headerAuthenticator, proxyClientNames)
 }
 
+//验证http请求
 func (a *requestHeaderAuthRequestHandler) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+	//从http请求头部获取用户名
 	name := headerValue(req.Header, a.nameHeaders.Value())
 	if len(name) == 0 {
 		return nil, false, nil
 	}
+	//从http请求头部获取用户组
 	groups := allHeaderValues(req.Header, a.groupHeaders.Value())
 	extra := newExtra(req.Header, a.extraHeaderPrefixes.Value())
 
@@ -174,7 +179,7 @@ func (a *requestHeaderAuthRequestHandler) AuthenticateRequest(req *http.Request)
 			req.Header.Del(prefix + k)
 		}
 	}
-
+	//返回头部带有用户相关信息
 	return &authenticator.Response{
 		User: &user.DefaultInfo{
 			Name:   name,
@@ -184,6 +189,7 @@ func (a *requestHeaderAuthRequestHandler) AuthenticateRequest(req *http.Request)
 	}, true, nil
 }
 
+//从http请求头部获取headersName中第一个存在的字段的值
 func headerValue(h http.Header, headerNames []string) string {
 	for _, headerName := range headerNames {
 		headerValue := h.Get(headerName)
@@ -194,9 +200,11 @@ func headerValue(h http.Header, headerNames []string) string {
 	return ""
 }
 
+// 从http请求头部中获取headerNames中全部存在的字段的值
 func allHeaderValues(h http.Header, headerNames []string) []string {
 	ret := []string{}
 	for _, headerName := range headerNames {
+		//转成规范要求的头部字段格式
 		headerKey := http.CanonicalHeaderKey(headerName)
 		values, ok := h[headerKey]
 		if !ok {

@@ -28,8 +28,6 @@ import (
 	"strings"
 
 	"github.com/imdario/mergo"
-	"k8s.io/klog"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -37,6 +35,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/klog"
 )
 
 const (
@@ -48,9 +47,9 @@ const (
 )
 
 var (
-	RecommendedConfigDir  = path.Join(homedir.HomeDir(), RecommendedHomeDir)
-	RecommendedHomeFile   = path.Join(RecommendedConfigDir, RecommendedFileName)
-	RecommendedSchemaFile = path.Join(RecommendedConfigDir, RecommendedSchemaName)
+	RecommendedConfigDir  = path.Join(homedir.HomeDir(), RecommendedHomeDir)       //$HOME/.kube
+	RecommendedHomeFile   = path.Join(RecommendedConfigDir, RecommendedFileName)   //$HOME/.kube/config
+	RecommendedSchemaFile = path.Join(RecommendedConfigDir, RecommendedSchemaName) // $HOME/.kube/schema
 )
 
 // currentMigrationRules returns a map that holds the history of recommended home directories used in previous versions.
@@ -114,11 +113,11 @@ func (g *ClientConfigGetter) IsDefaultConfig(config *restclient.Config) bool {
 // ExplicitPath is special, because if a user specifically requests a certain file be used and error is reported if this file is not present
 type ClientConfigLoadingRules struct {
 	ExplicitPath string
-	Precedence   []string
+	Precedence   []string //优先配置文件路径
 
 	// MigrationRules is a map of destination files to source files.  If a destination file is not present, then the source file is checked.
 	// If the source file is present, then it is copied to the destination file BEFORE any further loading happens.
-	MigrationRules map[string]string
+	MigrationRules map[string]string //兼容不同的路径文件
 
 	// DoNotResolvePaths indicates whether or not to resolve paths with respect to the originating files.  This is phrased as a negative so
 	// that a default object that doesn't set this will usually get the behavior it wants.
@@ -141,7 +140,7 @@ var _ ClientConfigLoader = &ClientConfigLoadingRules{}
 func NewDefaultClientConfigLoadingRules() *ClientConfigLoadingRules {
 	chain := []string{}
 	warnIfAllMissing := false
-
+	//如果指定KUBECONFIG环境变量，优先加载KUBECONFIG,否则加载$HOME/.kube/config
 	envVarFiles := os.Getenv(RecommendedConfigPathEnvVar)
 	if len(envVarFiles) != 0 {
 		fileList := filepath.SplitList(envVarFiles)
@@ -150,11 +149,12 @@ func NewDefaultClientConfigLoadingRules() *ClientConfigLoadingRules {
 		warnIfAllMissing = true
 
 	} else {
+		// $HOME/.kube/config
 		chain = append(chain, RecommendedHomeFile)
 	}
 
 	return &ClientConfigLoadingRules{
-		Precedence:       chain,
+		Precedence:       chain, // 优先配置文件路径
 		MigrationRules:   currentMigrationRules(),
 		WarnIfAllMissing: warnIfAllMissing,
 	}

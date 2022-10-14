@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/klog"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
@@ -35,6 +33,7 @@ import (
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
 	bootstrapsecretutil "k8s.io/cluster-bootstrap/util/secrets"
 	bootstraptokenutil "k8s.io/cluster-bootstrap/util/tokens"
+	"k8s.io/klog"
 )
 
 // TODO: A few methods in this package is copied from other sources. Either
@@ -49,6 +48,7 @@ func NewTokenAuthenticator(lister corev1listers.SecretNamespaceLister) *TokenAut
 }
 
 // TokenAuthenticator authenticates bootstrap tokens from secrets in the API server.
+// 1. 解析token是否为bootstrap token, 找到bootstrap token对应的secret内容进行比对。如果token一致，没有过期，且用于验证，则验证成功
 type TokenAuthenticator struct {
 	lister corev1listers.SecretNamespaceLister
 }
@@ -89,13 +89,17 @@ func tokenErrorf(s *corev1.Secret, format string, i ...interface{}) {
 //
 //     ( token-id ).( token-secret )
 //
+
+// 1. 解析token是否为bootstrap token, 找到bootstrap token对应的secret内容进行比对。如果token一致，没有过期，且用于验证，则验证成功
 func (t *TokenAuthenticator) AuthenticateToken(ctx context.Context, token string) (*authenticator.Response, bool, error) {
+	// 解析bootstrap token, 从中提取tokenID和tokenSecret
 	tokenID, tokenSecret, err := bootstraptokenutil.ParseToken(token)
 	if err != nil {
 		// Token isn't of the correct form, ignore it.
 		return nil, false, nil
 	}
 
+	//找到bootstrap tokne对应的secret: bootstrap-token-<tokenID>
 	secretName := bootstrapapi.BootstrapTokenSecretPrefix + tokenID
 	secret, err := t.lister.Get(secretName)
 	if err != nil {
@@ -105,34 +109,40 @@ func (t *TokenAuthenticator) AuthenticateToken(ctx context.Context, token string
 		}
 		return nil, false, err
 	}
-
+	// secret是否准备删除
 	if secret.DeletionTimestamp != nil {
 		tokenErrorf(secret, "is deleted and awaiting removal")
 		return nil, false, nil
 	}
 
+	// 当前secret是否bootstrap token secret
 	if string(secret.Type) != string(bootstrapapi.SecretTypeBootstrapToken) || secret.Data == nil {
 		tokenErrorf(secret, "has invalid type, expected %s.", bootstrapapi.SecretTypeBootstrapToken)
 		return nil, false, nil
 	}
 
+	//提取secret中的bootstrap token secret
 	ts := bootstrapsecretutil.GetData(secret, bootstrapapi.BootstrapTokenSecretKey)
+	// 比较传过来的token secret和secret中保存的token secret是否一致
 	if subtle.ConstantTimeCompare([]byte(ts), []byte(tokenSecret)) != 1 {
 		tokenErrorf(secret, "has invalid value for key %s, expected %s.", bootstrapapi.BootstrapTokenSecretKey, tokenSecret)
 		return nil, false, nil
 	}
 
+	// 比较传过来的token id和secret中保存的token id是否一致
 	id := bootstrapsecretutil.GetData(secret, bootstrapapi.BootstrapTokenIDKey)
 	if id != tokenID {
 		tokenErrorf(secret, "has invalid value for key %s, expected %s.", bootstrapapi.BootstrapTokenIDKey, tokenID)
 		return nil, false, nil
 	}
 
+	// bootstrap token是否过期
 	if bootstrapsecretutil.HasExpired(secret, time.Now()) {
 		// logging done in isSecretExpired method.
 		return nil, false, nil
 	}
 
+	// 判断当前bootstrap token是否用于验证使用
 	if bootstrapsecretutil.GetData(secret, bootstrapapi.BootstrapTokenUsageAuthentication) != "true" {
 		tokenErrorf(secret, "not marked %s=true.", bootstrapapi.BootstrapTokenUsageAuthentication)
 		return nil, false, nil
@@ -146,7 +156,7 @@ func (t *TokenAuthenticator) AuthenticateToken(ctx context.Context, token string
 
 	return &authenticator.Response{
 		User: &user.DefaultInfo{
-			Name:   bootstrapapi.BootstrapUserPrefix + string(id),
+			Name:   bootstrapapi.BootstrapUserPrefix + string(id), //用户名为"system:bootstrap:<token id>"
 			Groups: groups,
 		},
 	}, true, nil

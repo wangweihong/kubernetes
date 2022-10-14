@@ -43,6 +43,7 @@ func New(tokens map[string]*user.DefaultInfo) *TokenAuthenticator {
 // NewCSV returns a TokenAuthenticator, populated from a CSV file.
 // The CSV file must contain records in the format "token,username,useruid"
 func NewCSV(path string) (*TokenAuthenticator, error) {
+	//读取token csv文件，加载其中的用户信息 token,user,uid,"group1,group2,group3"
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -90,6 +91,7 @@ func NewCSV(path string) (*TokenAuthenticator, error) {
 	}, nil
 }
 
+// 如果token存在，则返回对应的用户信息
 func (a *TokenAuthenticator) AuthenticateToken(ctx context.Context, value string) (*authenticator.Response, bool, error) {
 	user, ok := a.tokens[value]
 	if !ok {

@@ -25,12 +25,14 @@ import (
 
 // Token checks a string value against a backing authentication store and
 // returns a Response or an error if the token could not be checked.
+// 验证token是否合法，返回token对应的用户相关信息
 type Token interface {
 	AuthenticateToken(ctx context.Context, token string) (*Response, bool, error)
 }
 
 // Request attempts to extract authentication information from a request and
 // returns a Response or an error if the request could not be checked.
+// 基于http请求进行身份验证
 type Request interface {
 	AuthenticateRequest(req *http.Request) (*Response, bool, error)
 }

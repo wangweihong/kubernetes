@@ -75,6 +75,7 @@ type UserConversion interface {
 }
 
 // UserConversionFunc is a function that implements the UserConversion interface.
+// 从证书链中提取验证的用户名、用户组信息
 type UserConversionFunc func(chain []*x509.Certificate) (*authenticator.Response, bool, error)
 
 // User implements x509.UserConversion
@@ -107,7 +108,9 @@ func NewDynamic(verifyOptionsFn VerifyOptionFunc, user UserConversion) *Authenti
 }
 
 // AuthenticateRequest authenticates the request using presented client certificates
+// 基于http请求证书进行验证
 func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+	//不是TLS连接或者TLS中没有传递证书
 	if req.TLS == nil || len(req.TLS.PeerCertificates) == 0 {
 		return nil, false, nil
 	}
@@ -118,13 +121,14 @@ func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.R
 	if !ok {
 		return nil, false, nil
 	}
+	//中间证书链？
 	if optsCopy.Intermediates == nil && len(req.TLS.PeerCertificates) > 1 {
 		optsCopy.Intermediates = x509.NewCertPool()
 		for _, intermediate := range req.TLS.PeerCertificates[1:] {
 			optsCopy.Intermediates.AddCert(intermediate)
 		}
 	}
-
+	// 证书有效期剩余时间
 	remaining := req.TLS.PeerCertificates[0].NotAfter.Sub(time.Now())
 	clientCertificateExpirationHistogram.Observe(remaining.Seconds())
 	chains, err := req.TLS.PeerCertificates[0].Verify(optsCopy)
@@ -195,6 +199,7 @@ func (a *Verifier) AuthenticateRequest(req *http.Request) (*authenticator.Respon
 	return a.auth.AuthenticateRequest(req)
 }
 
+//检测x509证书的Subject信息是否合法
 func (a *Verifier) verifySubject(subject pkix.Name) error {
 	// No CN restrictions
 	if len(a.allowedCommonNames.Value()) == 0 {
@@ -218,6 +223,7 @@ func DefaultVerifyOptions() x509.VerifyOptions {
 }
 
 // CommonNameUserConversion builds user info from a certificate chain using the subject's CommonName
+// 从x509证书Subject提取用户名，用户组。
 var CommonNameUserConversion = UserConversionFunc(func(chain []*x509.Certificate) (*authenticator.Response, bool, error) {
 	if len(chain[0].Subject.CommonName) == 0 {
 		return nil, false, nil

@@ -25,15 +25,15 @@ import (
 	"os"
 	"strings"
 
-	"k8s.io/klog"
-
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/klog"
 )
 
 // PasswordAuthenticator authenticates users by password
+// 通过加载--basic-user-file文件中的csv，加载文件中的用户信息存储在users表中
 type PasswordAuthenticator struct {
-	users map[string]*userPasswordInfo
+	users map[string]*userPasswordInfo //用户列表
 }
 
 type userPasswordInfo struct {
@@ -43,6 +43,7 @@ type userPasswordInfo struct {
 
 // NewCSV returns a PasswordAuthenticator, populated from a CSV file.
 // The CSV file must contain records in the format "password,username,useruid"
+// 加载csv文件，加载其中的用户名，密码，UID字段,生成密码验证器
 func NewCSV(path string) (*PasswordAuthenticator, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -83,6 +84,7 @@ func NewCSV(path string) (*PasswordAuthenticator, error) {
 }
 
 // AuthenticatePassword returns user info if authentication is successful, nil otherwise
+// 检测用户是否存在，密码是否匹配
 func (a *PasswordAuthenticator) AuthenticatePassword(ctx context.Context, username, password string) (*authenticator.Response, bool, error) {
 	user, ok := a.users[username]
 	if !ok {

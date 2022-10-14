@@ -24,15 +24,17 @@ import (
 )
 
 // unionAuthRequestHandler authenticates requests using a chain of authenticator.Requests
+// 联合身份验证器
 type unionAuthRequestHandler struct {
 	// Handlers is a chain of request authenticators to delegate to
-	Handlers []authenticator.Request
+	Handlers []authenticator.Request // 验证器列表
 	// FailOnError determines whether an error returns short-circuits the chain
-	FailOnError bool
+	FailOnError bool // 一旦发生错误是否停止验证
 }
 
 // New returns a request authenticator that validates credentials using a chain of authenticator.Request objects.
 // The entire chain is tried until one succeeds. If all fail, an aggregate error is returned.
+// 联合身份验证器. 多个验证器顺序对http请求进行验证（存在验证器出错仍然继续）。
 func New(authRequestHandlers ...authenticator.Request) authenticator.Request {
 	if len(authRequestHandlers) == 1 {
 		return authRequestHandlers[0]
@@ -42,6 +44,7 @@ func New(authRequestHandlers ...authenticator.Request) authenticator.Request {
 
 // NewFailOnError returns a request authenticator that validates credentials using a chain of authenticator.Request objects.
 // The first error short-circuits the chain.
+// 联合身份验证器. 多个验证器顺序对http请求进行验证（存在验证器出错则立即失败停止继续验证）。
 func NewFailOnError(authRequestHandlers ...authenticator.Request) authenticator.Request {
 	if len(authRequestHandlers) == 1 {
 		return authRequestHandlers[0]
@@ -52,9 +55,11 @@ func NewFailOnError(authRequestHandlers ...authenticator.Request) authenticator.
 // AuthenticateRequest authenticates the request using a chain of authenticator.Request objects.
 func (authHandler *unionAuthRequestHandler) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
 	var errlist []error
+	// 按顺序利用验证器对http请求进行验证
 	for _, currAuthRequestHandler := range authHandler.Handlers {
 		resp, ok, err := currAuthRequestHandler.AuthenticateRequest(req)
 		if err != nil {
+			// 设置了错误即失败
 			if authHandler.FailOnError {
 				return resp, ok, err
 			}

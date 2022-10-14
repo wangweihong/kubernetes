@@ -24,15 +24,17 @@ import (
 )
 
 // unionAuthTokenHandler authenticates tokens using a chain of authenticator.Token objects
+// 聚合多种token验证器
 type unionAuthTokenHandler struct {
 	// Handlers is a chain of request authenticators to delegate to
-	Handlers []authenticator.Token
+	Handlers []authenticator.Token // 多种token验证器
 	// FailOnError determines whether an error returns short-circuits the chain
-	FailOnError bool
+	FailOnError bool //有一个验证出错即退出
 }
 
 // New returns a token authenticator that validates credentials using a chain of authenticator.Token objects.
 // The entire chain is tried until one succeeds. If all fail, an aggregate error is returned.
+// 构建聚合token验证器
 func New(authTokenHandlers ...authenticator.Token) authenticator.Token {
 	if len(authTokenHandlers) == 1 {
 		return authTokenHandlers[0]
@@ -50,11 +52,14 @@ func NewFailOnError(authTokenHandlers ...authenticator.Token) authenticator.Toke
 }
 
 // AuthenticateToken authenticates the token using a chain of authenticator.Token objects.
+//token验证器逐一进行token验证
 func (authHandler *unionAuthTokenHandler) AuthenticateToken(ctx context.Context, token string) (*authenticator.Response, bool, error) {
 	var errlist []error
+	//token验证器逐一进行token验证
 	for _, currAuthRequestHandler := range authHandler.Handlers {
 		info, ok, err := currAuthRequestHandler.AuthenticateToken(ctx, token)
 		if err != nil {
+			// 设置了验证出错即退出
 			if authHandler.FailOnError {
 				return info, ok, err
 			}

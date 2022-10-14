@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
 	extensionsapiserver "k8s.io/apiextensions-apiserver/pkg/apiserver"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
@@ -104,7 +103,7 @@ cluster's shared state through which all other components interact.`,
 			utilflag.PrintFlags(cmd.Flags())
 
 			// set default options
-			completedOptions, err := Complete(s)
+			completedOptions, err := Complete(s) //设置server默认运行参数
 			if err != nil {
 				return err
 			}
@@ -119,7 +118,7 @@ cluster's shared state through which all other components interact.`,
 	}
 
 	fs := cmd.Flags()
-	namedFlagSets := s.Flags()
+	namedFlagSets := s.Flags() // apiserver标志集更新server运行参数
 	verflag.AddFlags(namedFlagSets.FlagSet("global"))
 	globalflag.AddGlobalFlags(namedFlagSets.FlagSet("global"), cmd.Name())
 	options.AddCustomGlobalFlags(namedFlagSets.FlagSet("generic"))
@@ -183,6 +182,7 @@ func CreateServerChain(completedOptions completedServerRunOptions, stopCh <-chan
 		return nil, err
 	}
 
+	//基于配置创建可运行的kube-apiserver?
 	kubeAPIServer, err := CreateKubeAPIServer(kubeAPIServerConfig, apiExtensionsServer.GenericAPIServer)
 	if err != nil {
 		return nil, err
@@ -302,6 +302,7 @@ func CreateKubeAPIServerConfig(
 		metrics.SetShowHidden()
 	}
 
+	// 获取服务网段范围未指定则默认为10.0.0.0/24,以及服务网段第一个IP作为apiserver服务地址.
 	serviceIPRange, apiServerServiceIP, err := master.ServiceIPRange(s.PrimaryServiceClusterIPRange)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -365,7 +366,7 @@ func CreateKubeAPIServerConfig(
 		config.ExtraConfig.ClusterAuthenticationInfo.RequestHeaderGroupHeaders = requestHeaderConfig.GroupHeaders
 		config.ExtraConfig.ClusterAuthenticationInfo.RequestHeaderUsernameHeaders = requestHeaderConfig.UsernameHeaders
 	}
-
+	//admission hook?
 	if err := config.GenericConfig.AddPostStartHook("start-kube-apiserver-admission-initializer", admissionPostStartHook); err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -389,6 +390,7 @@ func CreateKubeAPIServerConfig(
 		config.ExtraConfig.ProxyTransport = c
 	}
 
+	// 和OIDC验证有关: https://banzaicloud.com/blog/kubernetes-oidc/
 	if utilfeature.DefaultFeatureGate.Enabled(features.ServiceAccountIssuerDiscovery) {
 		// Load the public keys.
 		var pubKeys []interface{}
@@ -594,6 +596,7 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 
 	// process s.ServiceClusterIPRange from list to Primary and Secondary
 	// we process secondary only if provided by user
+	//服务网段
 	apiServerServiceIP, primaryServiceIPRange, secondaryServiceIPRange, err := getServiceIPAndRanges(s.ServiceClusterIPRanges)
 	if err != nil {
 		return options, err
@@ -617,7 +620,7 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 		}
 		klog.Infof("external host was not specified, using %v", s.GenericServerRunOptions.ExternalHost)
 	}
-
+	// 根据授权选项来跳转验证选项
 	s.Authentication.ApplyAuthorization(s.Authorization)
 
 	// Use (ServiceAccountSigningKeyFile != "") as a proxy to the user enabling

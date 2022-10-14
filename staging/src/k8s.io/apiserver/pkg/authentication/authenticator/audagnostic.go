@@ -80,7 +80,7 @@ func (a *audAgnosticTokenAuthenticator) AuthenticateToken(ctx context.Context, t
 	})
 }
 
-// WrapAudienceAgnosticToken wraps an audience agnostic token authenticator to
+// WrapAudienceAgnosticToken wraps an audience agnostic token(观众不可知令牌?) authenticator to
 // restrict its accepted audiences to a set of implicit audiences.
 func WrapAudienceAgnosticToken(implicit Audiences, delegate Token) Token {
 	return &audAgnosticTokenAuthenticator{

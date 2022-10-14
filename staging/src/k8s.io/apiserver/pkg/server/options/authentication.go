@@ -23,15 +23,13 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apiserver/pkg/server/dynamiccertificates"
-
 	"github.com/spf13/pflag"
-
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apiserver/pkg/authentication/authenticatorfactory"
 	"k8s.io/apiserver/pkg/authentication/request/headerrequest"
 	"k8s.io/apiserver/pkg/server"
+	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -39,15 +37,16 @@ import (
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 )
 
+// RequestHeaderAuthenticationOptions 即用户名/用户组信息通过http请求头部传递
 type RequestHeaderAuthenticationOptions struct {
 	// ClientCAFile is the root certificate bundle to verify client certificates on incoming requests
 	// before trusting usernames in headers.
-	ClientCAFile string
+	ClientCAFile string // --requestheader-client-ca-file 参数指定。 在信任http请求头部的用户名前，先对客户端进行TLS验证
 
-	UsernameHeaders     []string
-	GroupHeaders        []string
-	ExtraHeaderPrefixes []string
-	AllowedNames        []string
+	UsernameHeaders     []string // --requestheader-username-headers 参数指定 如[X-Remote-User]。 http请求头部用户名字段
+	GroupHeaders        []string //  --requestheader-group-headers 参数指定, 如"[X-Remote-Group]"  http请求头部用户组字段
+	ExtraHeaderPrefixes []string // --requestheader-extra-headers-prefix参数指定, 如"[X-Remote-Extra-]" http请求头部额外信息
+	AllowedNames        []string // --requestheader-allowed-names="[front-proxy-client]"
 }
 
 func (s *RequestHeaderAuthenticationOptions) Validate() []error {
@@ -129,7 +128,7 @@ func (s *RequestHeaderAuthenticationOptions) ToAuthenticationRequestHeaderConfig
 // get the verify options for your authenticator.
 type ClientCertAuthenticationOptions struct {
 	// ClientCA is the certificate bundle for all the signers that you'll recognize for incoming client certificates
-	ClientCA string
+	ClientCA string // --client-ca-file参数指定，用来对连接的客户端进行TLS连接的证书进行验签
 
 	// CAContentProvider are the options for verifying incoming connections using mTLS and directly assigning to users.
 	// Generally this is the CA bundle file used to authenticate client certificates

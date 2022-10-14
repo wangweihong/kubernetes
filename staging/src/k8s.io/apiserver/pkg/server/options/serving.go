@@ -24,14 +24,13 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
-	"k8s.io/klog"
-
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 	certutil "k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/keyutil"
 	cliflag "k8s.io/component-base/cli/flag"
+	"k8s.io/klog"
 )
 
 type SecureServingOptions struct {
@@ -70,9 +69,9 @@ type SecureServingOptions struct {
 
 type CertKey struct {
 	// CertFile is a file containing a PEM-encoded certificate, and possibly the complete certificate chain
-	CertFile string
+	CertFile string // --tls-private-cert-file  apiserver组件证书
 	// KeyFile is a file containing a PEM-encoded private key for the certificate specified by CertFile
-	KeyFile string
+	KeyFile string // --tls-private-key-file    apiserver密钥文件
 }
 
 type GeneratableKeyCert struct {

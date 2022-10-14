@@ -24,10 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"k8s.io/client-go/util/cert"
-
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 )
@@ -62,7 +61,7 @@ type DynamicFileCAContent struct {
 	name string
 
 	// filename is the name the file to read.
-	filename string
+	filename string // ca文件路径
 
 	// caBundle is a caBundleAndVerifier that contains the last read, non-zero length content of the file
 	caBundle atomic.Value
@@ -78,8 +77,8 @@ var _ CAContentProvider = &DynamicFileCAContent{}
 var _ ControllerRunner = &DynamicFileCAContent{}
 
 type caBundleAndVerifier struct {
-	caBundle      []byte
-	verifyOptions x509.VerifyOptions
+	caBundle      []byte             //证书内容
+	verifyOptions x509.VerifyOptions //证书校验选项
 }
 
 // NewDynamicCAContentFromFile returns a CAContentProvider based on a filename that automatically reloads content
@@ -107,7 +106,9 @@ func (c *DynamicFileCAContent) AddListener(listener Listener) {
 }
 
 // loadCABundle determines the next set of content for the file.
+// 加载证书对
 func (c *DynamicFileCAContent) loadCABundle() error {
+	//读取ca文件
 	caBundle, err := ioutil.ReadFile(c.filename)
 	if err != nil {
 		return err
@@ -118,6 +119,7 @@ func (c *DynamicFileCAContent) loadCABundle() error {
 	}
 
 	// check to see if we have a change. If the values are the same, do nothing.
+	//检测ca文件是否更改
 	if !c.hasCAChanged(caBundle) {
 		return nil
 	}
@@ -194,6 +196,7 @@ func (c *DynamicFileCAContent) processNextWorkItem() bool {
 	}
 	defer c.queue.Done(dsKey)
 
+	//加载指定证书
 	err := c.loadCABundle()
 	if err == nil {
 		c.queue.Forget(dsKey)
@@ -235,8 +238,8 @@ func newCABundleAndVerifier(name string, caBundle []byte) (*caBundleAndVerifier,
 
 	// Wrap with an x509 verifier
 	var err error
-	verifyOptions := defaultVerifyOptions()
-	verifyOptions.Roots, err = cert.NewPoolFromBytes(caBundle)
+	verifyOptions := defaultVerifyOptions()                    //默认为客户端验证校验
+	verifyOptions.Roots, err = cert.NewPoolFromBytes(caBundle) //从指定的字节中加载证书池, 作为根证书
 	if err != nil {
 		return nil, fmt.Errorf("error loading CA bundle for %q: %v", name, err)
 	}

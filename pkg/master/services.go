@@ -31,19 +31,23 @@ import (
 // setting service ip range to the default value in kubeoptions.DefaultServiceIPCIDR
 // for now until the default is removed per the deprecation timeline guidelines.
 // Returns service ip range, api server service IP, and an error
+// 获取服务网段范围未指定则默认为10.0.0.0/24,以及服务网段第一个IP作为apiserver服务地址
 func ServiceIPRange(passedServiceClusterIPRange net.IPNet) (net.IPNet, net.IP, error) {
 	serviceClusterIPRange := passedServiceClusterIPRange
+	//如果用户没有设置服务网段, 则采用默认的10.0.0.0/24服务网段
 	if passedServiceClusterIPRange.IP == nil {
 		klog.Warningf("No CIDR for service cluster IPs specified. Default value which was %s is deprecated and will be removed in future releases. Please specify it using --service-cluster-ip-range on kube-apiserver.", kubeoptions.DefaultServiceIPCIDR.String())
 		serviceClusterIPRange = kubeoptions.DefaultServiceIPCIDR
 	}
 
+	// 子网内IP数应小于65536 且大于8
 	size := integer.Int64Min(utilnet.RangeSize(&serviceClusterIPRange), 1<<16)
 	if size < 8 {
 		return net.IPNet{}, net.IP{}, fmt.Errorf("the service cluster IP range must be at least %d IP addresses", 8)
 	}
 
 	// Select the first valid IP from ServiceClusterIPRange to use as the GenericAPIServer service IP.
+	// 服务网段第一个IP作为apiserver service ip
 	apiServerServiceIP, err := utilnet.GetIndexedIP(&serviceClusterIPRange, 1)
 	if err != nil {
 		return net.IPNet{}, net.IP{}, err

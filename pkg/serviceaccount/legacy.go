@@ -22,14 +22,14 @@ import (
 	"fmt"
 
 	"gopkg.in/square/go-jose.v2/jwt"
-	"k8s.io/klog"
-
 	"k8s.io/api/core/v1"
 	apiserverserviceaccount "k8s.io/apiserver/pkg/authentication/serviceaccount"
+	"k8s.io/klog"
 )
 
 func LegacyClaims(serviceAccount v1.ServiceAccount, secret v1.Secret) (*jwt.Claims, interface{}) {
 	return &jwt.Claims{
+			// system:serviceaccount:<ns>:<name>
 			Subject: apiserverserviceaccount.MakeUsername(serviceAccount.Namespace, serviceAccount.Name),
 		}, &legacyPrivateClaims{
 			Namespace:          serviceAccount.Namespace,

@@ -30,19 +30,20 @@ import (
 
 	jose "gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
-
 	v1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 )
 
 // ServiceAccountTokenGetter defines functions to retrieve a named service account and secret
+// 从kubernetes获取对应资源信息
 type ServiceAccountTokenGetter interface {
 	GetServiceAccount(namespace, name string) (*v1.ServiceAccount, error)
 	GetPod(namespace, name string) (*v1.Pod, error)
 	GetSecret(namespace, name string) (*v1.Secret, error)
 }
 
+// 生成jwttoken
 type TokenGenerator interface {
 	// GenerateToken generates a token which will identify the given
 	// ServiceAccount. privateClaims is an interface that will be
@@ -58,6 +59,7 @@ type TokenGenerator interface {
 func JWTTokenGenerator(iss string, privateKey interface{}) (TokenGenerator, error) {
 	var signer jose.Signer
 	var err error
+	//根据密钥算法生成对应的JWT签名器
 	switch pk := privateKey.(type) {
 	case *rsa.PrivateKey:
 		signer, err = signerFromRSAPrivateKey(pk)
@@ -93,6 +95,7 @@ func JWTTokenGenerator(iss string, privateKey interface{}) (TokenGenerator, erro
 // Making the derivation non-reversible makes it impossible for someone to
 // accidentally obtain the real key from the key ID and use it for token
 // validation.
+// 对公钥进行sha256哈希
 func keyIDFromPublicKey(publicKey interface{}) (string, error) {
 	publicKeyDERBytes, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
@@ -141,6 +144,7 @@ func signerFromRSAPrivateKey(keyPair *rsa.PrivateKey) (jose.Signer, error) {
 	return signer, nil
 }
 
+//基于密钥对, 生成jwt签名器
 func signerFromECDSAPrivateKey(keyPair *ecdsa.PrivateKey) (jose.Signer, error) {
 	var alg jose.SignatureAlgorithm
 	switch keyPair.Curve {
@@ -153,7 +157,7 @@ func signerFromECDSAPrivateKey(keyPair *ecdsa.PrivateKey) (jose.Signer, error) {
 	default:
 		return nil, fmt.Errorf("unknown private key curve, must be 256, 384, or 521")
 	}
-
+	// 对公钥进行sha256哈希
 	keyID, err := keyIDFromPublicKey(&keyPair.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive keyID: %v", err)
@@ -203,9 +207,10 @@ func signerFromOpaqueSigner(opaqueSigner jose.OpaqueSigner) (jose.Signer, error)
 	return signer, nil
 }
 
+// jwt token生成器
 type jwtTokenGenerator struct {
-	iss    string
-	signer jose.Signer
+	iss    string      //颁发者
+	signer jose.Signer // jwt签名器
 }
 
 func (j *jwtTokenGenerator) GenerateToken(claims *jwt.Claims, privateClaims interface{}) (string, error) {

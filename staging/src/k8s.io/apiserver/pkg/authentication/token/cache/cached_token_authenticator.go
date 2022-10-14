@@ -31,7 +31,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sync/singleflight"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilclock "k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
@@ -50,7 +49,7 @@ type cacheRecord struct {
 }
 
 type cachedTokenAuthenticator struct {
-	authenticator authenticator.Token
+	authenticator authenticator.Token // token验证器
 
 	cacheErrs  bool
 	successTTL time.Duration

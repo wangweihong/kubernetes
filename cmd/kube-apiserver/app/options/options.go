@@ -44,8 +44,8 @@ type ServerRunOptions struct {
 	Audit                   *genericoptions.AuditOptions
 	Features                *genericoptions.FeatureOptions
 	Admission               *kubeoptions.AdmissionOptions
-	Authentication          *kubeoptions.BuiltInAuthenticationOptions //验证系统选项?
-	Authorization           *kubeoptions.BuiltInAuthorizationOptions
+	Authentication          *kubeoptions.BuiltInAuthenticationOptions //验证系统选项
+	Authorization           *kubeoptions.BuiltInAuthorizationOptions  //授权系统选项
 	CloudProvider           *kubeoptions.CloudProviderOptions
 	APIEnablement           *genericoptions.APIEnablementOptions
 	EgressSelector          *genericoptions.EgressSelectorOptions
@@ -57,7 +57,7 @@ type ServerRunOptions struct {
 	KubernetesServiceNodePort int
 	MaxConnectionBytesPerSec  int64
 	// ServiceClusterIPRange is mapped to input provided by user
-	ServiceClusterIPRanges string
+	ServiceClusterIPRanges string //服务网段,未指定则为10.0.0.0/24
 	//PrimaryServiceClusterIPRange and SecondaryServiceClusterIPRange are the results
 	// of parsing ServiceClusterIPRange into actual values
 	PrimaryServiceClusterIPRange   net.IPNet
@@ -76,7 +76,7 @@ type ServerRunOptions struct {
 	EndpointReconcilerType string
 
 	ServiceAccountSigningKeyFile     string
-	ServiceAccountIssuer             serviceaccount.TokenGenerator
+	ServiceAccountIssuer             serviceaccount.TokenGenerator // jwt token生成器
 	ServiceAccountTokenMaxExpiration time.Duration
 
 	ShowHiddenMetricsForVersion string
@@ -92,8 +92,8 @@ func NewServerRunOptions() *ServerRunOptions {
 		Audit:                   genericoptions.NewAuditOptions(),
 		Features:                genericoptions.NewFeatureOptions(),
 		Admission:               kubeoptions.NewAdmissionOptions(),
-		Authentication:          kubeoptions.NewBuiltInAuthenticationOptions().WithAll(),
-		Authorization:           kubeoptions.NewBuiltInAuthorizationOptions(),
+		Authentication:          kubeoptions.NewBuiltInAuthenticationOptions().WithAll(), //默认认证相关选项
+		Authorization:           kubeoptions.NewBuiltInAuthorizationOptions(),            // 默认授权相关选项
 		CloudProvider:           kubeoptions.NewCloudProviderOptions(),
 		APIEnablement:           genericoptions.NewAPIEnablementOptions(),
 		EgressSelector:          genericoptions.NewEgressSelectorOptions(),
