@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -136,9 +135,9 @@ type KubeletFlags struct {
 	WindowsPriorityClass string
 
 	// remoteRuntimeEndpoint is the endpoint of remote runtime service
-	RemoteRuntimeEndpoint string //连接运行时端点，linux默认是unix:///var/run/dockershim.sock
+	RemoteRuntimeEndpoint string //--container-runtime-endpoint连接运行时端点，linux默认是unix:///var/run/dockershim.sock
 	// remoteImageEndpoint is the endpoint of remote image service
-	RemoteImageEndpoint string
+	RemoteImageEndpoint string // --image-service-endpoint.镜像层服务连接点端点。 如果不指定, 默认采用RemoteRuntimeEndpoint的配置
 	// experimentalMounterPath is the path of mounter binary. Leave empty to use the default mount path
 	ExperimentalMounterPath string
 	// If enabled, the kubelet will integrate with the kernel memcg notification to determine if memory eviction thresholds are crossed rather than polling.

@@ -32,11 +32,6 @@ import (
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
 	"github.com/opencontainers/runc/libcontainer/configs"
-	"k8s.io/klog"
-	utilio "k8s.io/utils/io"
-	"k8s.io/utils/mount"
-	utilpath "k8s.io/utils/path"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -46,6 +41,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
 	internalapi "k8s.io/cri-api/pkg/apis"
+	"k8s.io/klog"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
 	podresourcesapi "k8s.io/kubernetes/pkg/kubelet/apis/podresources/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
@@ -66,6 +62,9 @@ import (
 	"k8s.io/kubernetes/pkg/util/oom"
 	"k8s.io/kubernetes/pkg/util/procfs"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
+	utilio "k8s.io/utils/io"
+	"k8s.io/utils/mount"
+	utilpath "k8s.io/utils/path"
 )
 
 const (
@@ -204,6 +203,7 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 		return nil, fmt.Errorf("failed to get mounted cgroup subsystems: %v", err)
 	}
 
+	// 检测/proc/swaps是否启动
 	if failSwapOn {
 		// Check whether swap is enabled. The Kubelet does not support running with swap enabled.
 		swapData, err := ioutil.ReadFile("/proc/swaps")
@@ -523,6 +523,7 @@ func (cm *containerManagerImpl) setupNode(activePods ActivePodsFunc) error {
 	return nil
 }
 
+// 获取指定pid文件或者进程名指定的进程的cgroup
 func getContainerNameForProcess(name, pidFile string) (string, error) {
 	pids, err := getPidsForProcess(name, pidFile)
 	if err != nil {
@@ -790,6 +791,7 @@ func getPidFromPidFile(pidFile string) (int, error) {
 	return pid, nil
 }
 
+// 从指定的pid文件或者进程名获取进程的Pid好
 func getPidsForProcess(name, pidFile string) ([]int, error) {
 	if len(pidFile) == 0 {
 		return procfs.PidOf(name)
@@ -878,7 +880,9 @@ func ensureProcessInContainerWithOOMScore(pid int, oomScoreAdj int, manager *fs.
 // getContainer returns the cgroup associated with the specified pid.
 // It enforces a unified hierarchy for memory and cpu cgroups.
 // On systemd environments, it uses the name=systemd cgroup for the specified pid.
+// 获取指定pid进程的cgroup
 func getContainer(pid int) (string, error) {
+	// 获取指定pid进程的cgroup信息，
 	cgs, err := cgroups.ParseCgroupFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err != nil {
 		return "", err

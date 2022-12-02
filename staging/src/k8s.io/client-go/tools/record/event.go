@@ -304,27 +304,30 @@ func (e *eventBroadcasterImpl) NewRecorder(scheme *runtime.Scheme, source v1.Eve
 }
 
 type recorderImpl struct {
-	scheme *runtime.Scheme
-	source v1.EventSource
+	scheme *runtime.Scheme // 通过scheme获取指定对象的GVK
+	source v1.EventSource  // 事件发生源
 	*watch.Broadcaster
 	clock clock.Clock
 }
 
+// 创建一个和object关联的Event对象,并发送给广播器
 func (recorder *recorderImpl) generateEvent(object runtime.Object, annotations map[string]string, timestamp metav1.Time, eventtype, reason, message string) {
 	ref, err := ref.GetReference(recorder.scheme, object)
 	if err != nil {
 		klog.Errorf("Could not construct reference to: '%#v' due to: '%v'. Will not report event: '%v' '%v' '%v'", object, err, eventtype, reason, message)
 		return
 	}
-
+	// 检测事件类型是否有效
 	if !util.ValidateEventType(eventtype) {
 		klog.Errorf("Unsupported event type: '%v'", eventtype)
 		return
 	}
 
+	// 创建一个Event对象，填充对应的事件信息
 	event := recorder.makeEvent(ref, annotations, eventtype, reason, message)
+	// 事件发生源
 	event.Source = recorder.source
-
+	//将Event对象发送给recorder
 	go func() {
 		// NOTE: events should be a non-blocking operation
 		defer utilruntime.HandleCrash()
@@ -332,20 +335,25 @@ func (recorder *recorderImpl) generateEvent(object runtime.Object, annotations m
 	}()
 }
 
+// 创建一个由对象object触发的事件，并发给广播器
 func (recorder *recorderImpl) Event(object runtime.Object, eventtype, reason, message string) {
 	recorder.generateEvent(object, nil, metav1.Now(), eventtype, reason, message)
 }
 
+// 创建一个由对象object触发的事件，并发给广播器
 func (recorder *recorderImpl) Eventf(object runtime.Object, eventtype, reason, messageFmt string, args ...interface{}) {
 	recorder.Event(object, eventtype, reason, fmt.Sprintf(messageFmt, args...))
 }
 
+// 创建一个由对象object触发的事件，并发给广播器
 func (recorder *recorderImpl) AnnotatedEventf(object runtime.Object, annotations map[string]string, eventtype, reason, messageFmt string, args ...interface{}) {
 	recorder.generateEvent(object, annotations, metav1.Now(), eventtype, reason, fmt.Sprintf(messageFmt, args...))
 }
 
+// 创建一个Event对象，填充对应的事件信息
 func (recorder *recorderImpl) makeEvent(ref *v1.ObjectReference, annotations map[string]string, eventtype, reason, message string) *v1.Event {
 	t := metav1.Time{Time: recorder.clock.Now()}
+	//事件绑定对象的命名空间
 	namespace := ref.Namespace
 	if namespace == "" {
 		namespace = metav1.NamespaceDefault
@@ -356,12 +364,12 @@ func (recorder *recorderImpl) makeEvent(ref *v1.ObjectReference, annotations map
 			Namespace:   namespace,
 			Annotations: annotations,
 		},
-		InvolvedObject: *ref,
+		InvolvedObject: *ref, // 产生事件的对象信息
 		Reason:         reason,
 		Message:        message,
 		FirstTimestamp: t,
 		LastTimestamp:  t,
 		Count:          1,
-		Type:           eventtype,
+		Type:           eventtype, // 事件类型，当前就两种:Normal和Warning
 	}
 }

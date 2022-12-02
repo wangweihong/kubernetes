@@ -20,9 +20,8 @@ import (
 	"fmt"
 	"sync"
 
-	"k8s.io/klog"
-
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
 )
 
 // Interface can be implemented by anything that knows how to watch and report changes.
@@ -40,6 +39,7 @@ type Interface interface {
 // EventType defines the possible types of events.
 type EventType string
 
+// 用来描述如何处理接收到的Event对象
 const (
 	Added    EventType = "ADDED"
 	Modified EventType = "MODIFIED"
@@ -53,7 +53,7 @@ const (
 // Event represents a single event to a watched resource.
 // +k8s:deepcopy-gen=true
 type Event struct {
-	Type EventType
+	Type EventType // 事件动作。
 
 	// Object is:
 	//  * If Type is Added or Modified: the new state of the object.
@@ -64,7 +64,7 @@ type Event struct {
 	//    nor miss any events.
 	//  * If Type is Error: *api.Status is recommended; other types may make sense
 	//    depending on context.
-	Object runtime.Object
+	Object runtime.Object //事件对象
 }
 
 type emptyWatch chan Event

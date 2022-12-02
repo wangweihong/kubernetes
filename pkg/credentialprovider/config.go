@@ -58,9 +58,9 @@ type DockerConfigEntry struct {
 
 var (
 	preferredPathLock sync.Mutex
-	preferredPath     = ""
-	workingDirPath    = ""
-	homeDirPath, _    = os.UserHomeDir()
+	preferredPath     = ""               // 默认设置为kubelet根目录 /var/lib/kubelet
+	workingDirPath    = ""               //
+	homeDirPath, _    = os.UserHomeDir() // 当前用户的Home目录
 	rootDirPath       = "/"
 	homeJsonDirPath   = filepath.Join(homeDirPath, ".docker")
 	rootJsonDirPath   = filepath.Join(rootDirPath, ".docker")
@@ -99,6 +99,7 @@ func ReadDockercfgFile(searchPaths []string) (cfg DockerConfig, err error) {
 	}
 
 	for _, configPath := range searchPaths {
+		// 构建docker.cfg文件绝对路径
 		absDockerConfigFileLocation, err := filepath.Abs(filepath.Join(configPath, configFileName))
 		if err != nil {
 			klog.Errorf("while trying to canonicalize %s: %v", configPath, err)

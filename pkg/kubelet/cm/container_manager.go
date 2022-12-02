@@ -17,11 +17,13 @@ limitations under the License.
 package cm
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/sets"
-	// TODO: Migrate kubelet to either use its own internal objects or client library.
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets" // TODO: Migrate kubelet to either use its own internal objects or client library.
 	internalapi "k8s.io/cri-api/pkg/apis"
 	podresourcesapi "k8s.io/kubernetes/pkg/kubelet/apis/podresources/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
@@ -32,10 +34,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/pluginmanager/cache"
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
-
-	"fmt"
-	"strconv"
-	"strings"
 )
 
 type ActivePodsFunc func() []*v1.Pod
@@ -122,11 +120,11 @@ type NodeConfig struct {
 	RuntimeCgroupsName    string
 	SystemCgroupsName     string
 	KubeletCgroupsName    string
-	ContainerRuntime      string
+	ContainerRuntime      string // 容器运行时类型
 	CgroupsPerQOS         bool
 	CgroupRoot            string
 	CgroupDriver          string
-	KubeletRootDir        string
+	KubeletRootDir        string // kubelet根目录, 默认/var/lib/kubelet
 	ProtectKernelDefaults bool
 	NodeAllocatableConfig
 	QOSReserved                           map[v1.ResourceName]int64

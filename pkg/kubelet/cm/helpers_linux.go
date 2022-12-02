@@ -24,7 +24,6 @@ import (
 	"strconv"
 
 	libcontainercgroups "github.com/opencontainers/runc/libcontainer/cgroups"
-
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -260,8 +259,11 @@ func GetKubeletContainer(kubeletCgroups string) (string, error) {
 }
 
 // GetRuntimeContainer returns the cgroup used by the container runtime
+// 获取运行时进程的cgroup
 func GetRuntimeContainer(containerRuntime, runtimeCgroups string) (string, error) {
+	// 如果是docker,从/var/run/docker.pid
 	if containerRuntime == "docker" {
+		// 获取指定进程的cgroup
 		cont, err := getContainerNameForProcess(dockerProcessName, dockerPidFile)
 		if err != nil {
 			return "", fmt.Errorf("failed to get container name for docker process: %v", err)

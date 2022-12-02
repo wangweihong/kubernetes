@@ -5142,6 +5142,7 @@ type Event struct {
 	metav1.ObjectMeta `json:"metadata" protobuf:"bytes,1,opt,name=metadata"`
 
 	// The object that this event is about.
+	// 当前事件关联的对象
 	InvolvedObject ObjectReference `json:"involvedObject" protobuf:"bytes,2,opt,name=involvedObject"`
 
 	// This should be a short, machine understandable string that gives the reason
@@ -5157,6 +5158,7 @@ type Event struct {
 
 	// The component reporting this event. Should be a short machine understandable string.
 	// +optional
+	// 事件发生源
 	Source EventSource `json:"source,omitempty" protobuf:"bytes,5,opt,name=source"`
 
 	// The time at which the event was first recorded. (Time of server receipt is in TypeMeta.)
@@ -5173,6 +5175,7 @@ type Event struct {
 
 	// Type of this event (Normal, Warning), new types could be added in the future
 	// +optional
+	//事件类型, 当前有告警和普通事件两种
 	Type string `json:"type,omitempty" protobuf:"bytes,9,opt,name=type"`
 
 	// Time when this Event was first observed.

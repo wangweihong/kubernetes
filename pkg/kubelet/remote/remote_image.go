@@ -23,10 +23,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/klog"
-
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 )
 
@@ -37,6 +36,7 @@ type RemoteImageService struct {
 }
 
 // NewRemoteImageService creates a new internalapi.ImageManagerService.
+// 建立与指定镜像服务的连接，提供镜像操作接口
 func NewRemoteImageService(endpoint string, connectionTimeout time.Duration) (internalapi.ImageManagerService, error) {
 	klog.V(3).Infof("Connecting to image service %s", endpoint)
 	addr, dialer, err := util.GetAddressAndDialer(endpoint)

@@ -24,10 +24,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/klog"
-
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/util/logreduction"
 	utilexec "k8s.io/utils/exec"
@@ -47,8 +46,10 @@ const (
 )
 
 // NewRemoteRuntimeService creates a new internalapi.RuntimeService.
+// 建立与指定运行时服务的连接，提供容器操作接口
 func NewRemoteRuntimeService(endpoint string, connectionTimeout time.Duration) (internalapi.RuntimeService, error) {
 	klog.V(3).Infof("Connecting to runtime service %s", endpoint)
+	// 通过unix socket协议连接指定端点
 	addr, dialer, err := util.GetAddressAndDialer(endpoint)
 	if err != nil {
 		return nil, err
@@ -61,7 +62,7 @@ func NewRemoteRuntimeService(endpoint string, connectionTimeout time.Duration) (
 		klog.Errorf("Connect remote runtime %s failed: %v", addr, err)
 		return nil, err
 	}
-
+	//返回容器运行时服务接口
 	return &RemoteRuntimeService{
 		timeout:       connectionTimeout,
 		runtimeClient: runtimeapi.NewRuntimeServiceClient(conn),

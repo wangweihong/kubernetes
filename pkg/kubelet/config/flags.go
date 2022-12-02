@@ -31,7 +31,7 @@ type ContainerRuntimeOptions struct {
 	// ContainerRuntime is the container runtime to use.
 	ContainerRuntime string //容器运行时类型, 如docker
 	// RuntimeCgroups that container runtime is expected to be isolated in.
-	RuntimeCgroups string
+	RuntimeCgroups string // --runtime-cgroups参数
 	// RedirectContainerStreaming enables container streaming redirect.
 	// When RedirectContainerStreaming is false, kubelet will proxy container streaming data
 	// between apiserver and container runtime. This approach is more secure, but the proxy

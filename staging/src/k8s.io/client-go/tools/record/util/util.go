@@ -24,6 +24,7 @@ import (
 )
 
 // ValidateEventType checks that eventtype is an expected type of event
+// 检测事件类型是否合法
 func ValidateEventType(eventtype string) bool {
 	switch eventtype {
 	case v1.EventTypeNormal, v1.EventTypeWarning:

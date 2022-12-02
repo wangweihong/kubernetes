@@ -35,6 +35,7 @@ var (
 // object, or an error if the object doesn't follow the conventions
 // that would allow this.
 // TODO: should take a meta.Interface see http://issue.k8s.io/7127
+// 根据scheme后指定对应应哟给
 func GetReference(scheme *runtime.Scheme, obj runtime.Object) (*v1.ObjectReference, error) {
 	if obj == nil {
 		return nil, ErrNilObject

@@ -26,6 +26,7 @@ import (
 
 // instrumentedRuntimeService wraps the RuntimeService and records the operations
 // and errors metrics.
+// 这里只是封装了一层,记录每次调用底层服务接口的指标
 type instrumentedRuntimeService struct {
 	service internalapi.RuntimeService
 }
@@ -37,6 +38,7 @@ func newInstrumentedRuntimeService(service internalapi.RuntimeService) internala
 
 // instrumentedImageManagerService wraps the ImageManagerService and records the operations
 // and errors metrics.
+// 这里只是封装了一层,记录每次调用底层服务接口的指标
 type instrumentedImageManagerService struct {
 	service internalapi.ImageManagerService
 }

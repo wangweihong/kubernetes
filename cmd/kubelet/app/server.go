@@ -35,9 +35,6 @@ import (
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"k8s.io/klog"
-	"k8s.io/utils/mount"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,6 +62,7 @@ import (
 	"k8s.io/component-base/metrics"
 	"k8s.io/component-base/version"
 	"k8s.io/component-base/version/verflag"
+	"k8s.io/klog"
 	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 	"k8s.io/kubernetes/cmd/kubelet/app/options"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -103,6 +101,7 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/utils/exec"
+	"k8s.io/utils/mount"
 )
 
 const (
@@ -444,6 +443,7 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 // The kubeDeps argument may be nil - if so, it is initialized from the settings on KubeletServer.
 // Otherwise, the caller is assumed to have set up the Dependencies object and a default one will
 // not be generated.
+// kubelet主运行函数. 这个函数执行后正常情况不会退出。
 func Run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate featuregate.FeatureGate, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
 	// 打印kubelet版本号
@@ -568,6 +568,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 	}
 
+	// kubeDeps.Cloud从哪里来?
 	if kubeDeps.Cloud == nil {
 		// 如果指定了内置的云提供商或者没有指定云提供商
 		// 如果是外置云提供商，应该是外置云提供商执行初始化
@@ -587,7 +588,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 	}
 
-	// 获取kubelet主机名
+	// 获取kubelet主机名. 如果没有通过参数替换, 默认是用主机名
 	hostName, err := nodeutil.GetHostname(s.HostnameOverride)
 	if err != nil {
 		return err
@@ -600,7 +601,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 
 	// if in standalone mode, indicate as much by setting all clients to nil
 	switch {
-	//没有指定apiserver的配置
+	//没有指定apiserver的配置，不和apiserver打交道
 	case standaloneMode:
 		kubeDeps.KubeClient = nil
 		kubeDeps.EventClient = nil
@@ -624,6 +625,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 
 		// make a separate client for events
+		// 为什么要单独一个客户端？QPS?
 		eventClientConfig := *clientConfig
 		eventClientConfig.QPS = float32(s.EventRecordQPS)
 		eventClientConfig.Burst = int(s.EventBurst)
@@ -633,6 +635,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 
 		// make a separate client for heartbeat with throttling disabled and a timeout attached
+		// 检测apiserver健康的客户端?
 		heartbeatClientConfig := *clientConfig
 		heartbeatClientConfig.Timeout = s.KubeletConfiguration.NodeStatusUpdateFrequency.Duration
 		// The timeout is the minimum of the lease duration and status update frequency
@@ -668,6 +671,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		cgroupRoots = append(cgroupRoots, kubeletCgroup)
 	}
 
+	// 获取运行时进程的cgroup
 	runtimeCgroup, err := cm.GetRuntimeContainer(s.ContainerRuntime, s.RuntimeCgroups)
 	if err != nil {
 		klog.Warningf("failed to get the container runtime's cgroup: %v. Runtime system container metrics may be missing.", err)
@@ -690,6 +694,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 	}
 
 	// Setup event recorder if required.
+	// 添加事件源?
 	makeEventRecorder(kubeDeps, nodeName)
 
 	if kubeDeps.ContainerManager == nil {
@@ -761,7 +766,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 
 		devicePluginEnabled := utilfeature.DefaultFeatureGate.Enabled(features.DevicePlugins)
-		//
+		// 容器管理器
 		kubeDeps.ContainerManager, err = cm.NewContainerManager(
 			kubeDeps.Mounter,
 			kubeDeps.CAdvisorInterface,
@@ -801,6 +806,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		}
 	}
 
+	// 用于确保kubelet由root用户运行
 	if err := checkPermissions(); err != nil {
 		klog.Error(err)
 	}
@@ -813,6 +819,8 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 		klog.Warning(err)
 	}
 
+	//1.对节点上的cri插件进行预处理。如检测cri服务是否正常,根据cni插件配置设置docker网络插件配置
+	//2. 初始容器操作，镜像操作接口
 	err = kubelet.PreInitRuntimeService(&s.KubeletConfiguration,
 		kubeDeps, &s.ContainerRuntimeOptions,
 		s.ContainerRuntime,
@@ -1138,6 +1146,7 @@ func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencie
 		AllowPrivileged: true,
 	})
 
+	// 设置docker cfg文件优先存放路径为kubelet根路径
 	credentialprovider.SetPreferredDockercfgPath(kubeServer.RootDirectory)
 	klog.V(2).Infof("Using root directory: %v", kubeServer.RootDirectory)
 

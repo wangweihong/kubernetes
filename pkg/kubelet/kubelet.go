@@ -33,11 +33,6 @@ import (
 	"time"
 
 	cadvisorapi "github.com/google/cadvisor/info/v1"
-	utilexec "k8s.io/utils/exec"
-	"k8s.io/utils/integer"
-	"k8s.io/utils/mount"
-	utilnet "k8s.io/utils/net"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -122,6 +117,10 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/kubernetes/pkg/volume/util/volumepathhandler"
+	utilexec "k8s.io/utils/exec"
+	"k8s.io/utils/integer"
+	"k8s.io/utils/mount"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -246,7 +245,7 @@ type Dependencies struct {
 	Cloud                   cloudprovider.Interface
 	ContainerManager        cm.ContainerManager
 	DockerClientConfig      *dockershim.ClientConfig // dockershim的客户端配置
-	EventClient             v1core.EventsGetter
+	EventClient             v1core.EventsGetter      // 事件客户端
 	HeartbeatClient         clientset.Interface
 	OnHeartbeatFailure      func()
 	KubeClient              clientset.Interface // 和apiserver通信，通过kubeconfig配置构建
@@ -255,14 +254,14 @@ type Dependencies struct {
 	OOMAdjuster             *oom.OOMAdjuster
 	OSInterface             kubecontainer.OSInterface
 	PodConfig               *config.PodConfig
-	Recorder                record.EventRecorder
+	Recorder                record.EventRecorder // 事件源
 	Subpather               subpath.Interface
-	VolumePlugins           []volume.VolumePlugin      // 支持的卷插件
-	DynamicPluginProber     volume.DynamicPluginProber // flex volume卷插件动态发现目录
-	TLSOptions              *server.TLSOptions         // kubelet https server tls配置。包含验证kubelet证书。用来启动kubelet https server.
-	KubeletConfigController *kubeletconfig.Controller  // kubelet 动态配置控制器
-	RemoteRuntimeService    internalapi.RuntimeService
-	RemoteImageService      internalapi.ImageManagerService
+	VolumePlugins           []volume.VolumePlugin           // 支持的卷插件
+	DynamicPluginProber     volume.DynamicPluginProber      // flex volume卷插件动态发现目录
+	TLSOptions              *server.TLSOptions              // kubelet https server tls配置。包含验证kubelet证书。用来启动kubelet https server.
+	KubeletConfigController *kubeletconfig.Controller       // kubelet 动态配置控制器
+	RemoteRuntimeService    internalapi.RuntimeService      // 运行时服务层接口，提供操作容器相关功能, 在PreInitRuntimeService时初始
+	RemoteImageService      internalapi.ImageManagerService // 镜像服务层接口, 提供镜像操作相关功能，PreInitRuntimeService时初始
 	criHandler              http.Handler
 	dockerLegacyService     dockershim.DockerLegacyService
 	// remove it after cadvisor.UsingLegacyCadvisorStats dropped.
@@ -321,6 +320,7 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 }
 
 // PreInitRuntimeService will init runtime service before RunKubelet.
+////对节点上的cri插件进行预处理。如检测cri服务是否正常,根据cni插件配置设置docker网络插件配置， 初始化运行时、镜像服务接口
 func PreInitRuntimeService(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	kubeDeps *Dependencies,
 	crOptions *config.ContainerRuntimeOptions,
@@ -387,9 +387,11 @@ func PreInitRuntimeService(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	var err error
+	// 建立与指定运行时服务的连接，提供容器操作接口
 	if kubeDeps.RemoteRuntimeService, err = remote.NewRemoteRuntimeService(remoteRuntimeEndpoint, kubeCfg.RuntimeRequestTimeout.Duration); err != nil {
 		return err
 	}
+	// 镜像层操作服务。如果没有指定remoteImageEndpoint,默认和运行时一致
 	if kubeDeps.RemoteImageService, err = remote.NewRemoteImageService(remoteImageEndpoint, kubeCfg.RuntimeRequestTimeout.Duration); err != nil {
 		return err
 	}
@@ -966,11 +968,11 @@ type Kubelet struct {
 	cadvisor cadvisor.Interface
 
 	// Set to true to have the node register itself with the apiserver.
-	registerNode bool
+	registerNode bool // --register-node是否注册kubelet到apiserver（即kubelet向apiserver创建node对象）默认为true
 	// List of taints to add to a node object when the kubelet registers itself.
-	registerWithTaints []api.Taint
+	registerWithTaints []api.Taint // --register-with-taints. kubelet向apiserver注册node对象添加到taint
 	// Set to true to have the node register itself as schedulable.
-	registerSchedulable bool
+	registerSchedulable bool //--register-schedulable。 kubelet注册时设置时, 设置node.spec.unschedulable
 	// for internal book keeping; access only from within registerWithApiserver
 	registrationCompleted bool
 
@@ -980,14 +982,14 @@ type Kubelet struct {
 	// masterServiceNamespace is the namespace that the master service is exposed in.
 	masterServiceNamespace string
 	// serviceLister knows how to list services
-	serviceLister serviceLister
+	serviceLister serviceLister // 获取apiserver服务列表接口
 	// nodeLister knows how to list nodes
 	nodeLister corelisters.NodeLister
 	// nodeHasSynced indicates whether nodes have been sync'd at least once.
 	// Check this before trusting a response from the node lister.
 	nodeHasSynced cache.InformerSynced
 	// a list of node labels to register
-	nodeLabels map[string]string
+	nodeLabels map[string]string // --node-labels : 通过参数指定kubelet注册node时的 label
 
 	// Last timestamp when runtime responded on ping.
 	// Mutex is used to protect this value.
@@ -1044,7 +1046,7 @@ type Kubelet struct {
 	cloudResourceSyncManager cloudresource.SyncManager
 
 	// Indicates that the node initialization happens in an external cloud controller
-	externalCloudProvider bool
+	externalCloudProvider bool //是否设置了cloud provider
 	// Reference to this node.
 	nodeRef *v1.ObjectReference
 
@@ -1166,14 +1168,15 @@ type Kubelet struct {
 	nodeIPValidator func(net.IP) error
 
 	// If non-nil, this is a unique identifier for the node in an external database, eg. cloudprovider
-	providerID string
+	providerID string // --provider-id: 如cloud provider需要标记节点在其真实实例ID.这个ID可以在kubelet启动时指定
+	// 也可以在调用cloudprovider接口来获取
 
 	// clock is an interface that provides time related functionality in a way that makes it
 	// easy to test the code.
 	clock clock.Clock
 
 	// handlers called during the tryUpdateNodeStatus cycle
-	setNodeStatusFuncs []func(*v1.Node) error
+	setNodeStatusFuncs []func(*v1.Node) error //用于根据实际情况更新node.status的一系列函数
 
 	lastNodeUnschedulableLock sync.Mutex
 	// maintains Node.Spec.Unschedulable value from previous run of tryUpdateNodeStatus()
@@ -1201,8 +1204,7 @@ type Kubelet struct {
 	// enableControllerAttachDetach indicates the Attach/Detach controller
 	// should manage attachment/detachment of volumes scheduled to this node,
 	// and disable kubelet from executing any attach/detach operations
-	enableControllerAttachDetach bool
-
+	enableControllerAttachDetach bool //--enable-controller-attach-detach, 用来设置是否由controllermanager的controller来管理调度到当前节点的卷
 	// trigger deleting containers in a pod
 	containerDeletor *podContainerDeletor
 

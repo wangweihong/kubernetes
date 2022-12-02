@@ -82,7 +82,7 @@ type KubeletConfiguration struct {
 	SyncFrequency metav1.Duration
 	// fileCheckFrequency is the duration between checking config files for
 	// new data
-	FileCheckFrequency metav1.Duration //静态文件更新检测频率
+	FileCheckFrequency metav1.Duration //静态文件更新检测频率。用于同步staticPodPath中的manifests
 	// httpCheckFrequency is the duration between checking http for new data
 	HTTPCheckFrequency metav1.Duration
 	// staticPodURL is the URL for accessing static pods to run
@@ -202,7 +202,7 @@ type KubeletConfiguration struct {
 	// specific top level QoS cgroup.
 	CgroupsPerQOS bool
 	// driver that the kubelet uses to manipulate cgroups on the host (cgroupfs or systemd)
-	CgroupDriver string // cgroup驱动, 现在有croupfs和systemd两种. 默认为cgroupfs
+	CgroupDriver string // --cgroup-driver. cgroup驱动, 现在有croupfs和systemd两种. 默认为cgroupfs。
 	// CPUManagerPolicy is the name of the policy to use.
 	// Requires the CPUManager feature gate to be enabled.
 	CPUManagerPolicy string
@@ -297,7 +297,7 @@ type KubeletConfiguration struct {
 	// "k8s.io/kubernetes/pkg/features/kube_features.go".
 	FeatureGates map[string]bool
 	// Tells the Kubelet to fail to start if swap is enabled on the node.
-	FailSwapOn bool
+	FailSwapOn bool // 当kubelet开启了swap on时是否执行终止kubelet的运行
 	// A quantity defines the maximum size of the container log file before it is rotated. For example: "5Mi" or "256Ki".
 	ContainerLogMaxSize string
 	// Maximum number of container log files that can be present for a container.

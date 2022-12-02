@@ -79,6 +79,7 @@ func CreateListener(endpoint string) (net.Listener, error) {
 }
 
 // GetAddressAndDialer returns the address parsed from the given endpoint and a context dialer.
+// 通过unix socket协议连接指定端点
 func GetAddressAndDialer(endpoint string) (string, func(ctx context.Context, addr string) (net.Conn, error), error) {
 	protocol, addr, err := parseEndpointWithFallbackProtocol(endpoint, unixProtocol)
 	if err != nil {

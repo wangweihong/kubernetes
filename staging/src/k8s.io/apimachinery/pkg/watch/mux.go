@@ -48,7 +48,7 @@ type Broadcaster struct {
 	nextWatcher  int64
 	distributing sync.WaitGroup
 
-	incoming chan Event
+	incoming chan Event //用来接收需要处理对象的channel。Event中包含需要对指定的对象做何种处理
 
 	// How large to make watcher's channel.
 	watchQueueLength int
@@ -58,7 +58,7 @@ type Broadcaster struct {
 	// It's more fair to do this on a per-watcher basis than to do it on the
 	// "incoming" channel, which would allow one slow watcher to prevent all
 	// other watchers from getting new events.
-	fullChannelBehavior FullChannelBehavior
+	fullChannelBehavior FullChannelBehavior //
 }
 
 // NewBroadcaster creates a new Broadcaster. queueLength is the maximum number of events to queue per watcher.
@@ -72,6 +72,7 @@ func NewBroadcaster(queueLength int, fullChannelBehavior FullChannelBehavior) *B
 		fullChannelBehavior: fullChannelBehavior,
 	}
 	m.distributing.Add(1)
+	// 启动广播器主功能，等待来自incoming,并进行处理
 	go m.loop()
 	return m
 }
@@ -96,6 +97,7 @@ func (obj functionFakeRuntimeObject) DeepCopyObject() runtime.Object {
 // The purpose of this terrible hack is so that watchers added after an event
 // won't ever see that event, and will always see any event after they are
 // added.
+//发送内部事件到广播器。
 func (b *Broadcaster) blockQueue(f func()) {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -185,6 +187,8 @@ func (m *Broadcaster) closeAll() {
 }
 
 // Action distributes the given event among all watchers.
+// 发送事件对象到广播器。
+// action为对事件对象做什么操作，如创建
 func (m *Broadcaster) Action(action EventType, obj runtime.Object) {
 	m.incoming <- Event{action, obj}
 }
@@ -204,13 +208,16 @@ func (m *Broadcaster) Shutdown() {
 func (m *Broadcaster) loop() {
 	// Deliberately not catching crashes here. Yes, bring down the process if there's a
 	// bug in watch.Broadcaster.
+	//从incoming chan取出接收到的事件。知道incoming chan被关闭
 	for event := range m.incoming {
+		// 检测该事件对象只是内部用来做测试的
 		if event.Type == internalRunFunctionMarker {
 			event.Object.(functionFakeRuntimeObject)()
 			continue
 		}
 		m.distribute(event)
 	}
+	// 这说明m.incoming已经被关闭
 	m.closeAll()
 	m.distributing.Done()
 }
@@ -219,6 +226,7 @@ func (m *Broadcaster) loop() {
 func (m *Broadcaster) distribute(event Event) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	//
 	if m.fullChannelBehavior == DropIfChannelFull {
 		for _, w := range m.watchers {
 			select {
