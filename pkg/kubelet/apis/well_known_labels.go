@@ -52,7 +52,7 @@ var kubeletLabels = sets.NewString(
 )
 
 var kubeletLabelNamespaces = sets.NewString(
-	v1.LabelNamespaceSuffixKubelet,
+	v1.LabelNamespaceSuffixKubelet, // kubelet.kubernetes.io
 	v1.LabelNamespaceSuffixNode,
 )
 

@@ -61,6 +61,7 @@ func consistentReadSync(filename string, attempts int, sync func(int)) ([]byte, 
 
 // ReadAtMost reads up to `limit` bytes from `r`, and reports an error
 // when `limit` bytes are read.
+//  限制读取文件的最大值
 func ReadAtMost(r io.Reader, limit int64) ([]byte, error) {
 	limitedReader := &io.LimitedReader{R: r, N: limit}
 	data, err := ioutil.ReadAll(limitedReader)

@@ -371,6 +371,7 @@ func kubeletConfigFlagPrecedence(kc *kubeletconfiginternal.KubeletConfiguration,
 	return nil
 }
 
+//读取配置文件
 func loadConfigFile(name string) (*kubeletconfiginternal.KubeletConfiguration, error) {
 	const errFmt = "failed to load Kubelet config file %s, error %v"
 	// compute absolute path based on current working dir
@@ -407,6 +408,7 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 
 	// 运行时配置
 	var dockerClientConfig *dockershim.ClientConfig
+	//初始化docker容器运行时默认配置
 	if s.ContainerRuntime == kubetypes.DockerContainerRuntime {
 		dockerClientConfig = &dockershim.ClientConfig{
 			DockerEndpoint:            s.DockerEndpoint,

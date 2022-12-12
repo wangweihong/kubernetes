@@ -243,6 +243,7 @@ func ValidateKubeletFlags(f *KubeletFlags) error {
 		return fmt.Errorf("invalid configuration: NodeStatusMaxImages (--node-status-max-images) must be -1 or greater")
 	}
 
+	// 检测kubelet设置了k8s内置标签, 但标签不在 kubelet内置标签列表中时
 	unknownLabels := sets.NewString()
 	for k := range f.NodeLabels {
 		if isKubernetesLabel(k) && !kubeletapis.IsKubeletLabel(k) {
@@ -291,6 +292,7 @@ func NewKubeletConfiguration() (*kubeletconfig.KubeletConfiguration, error) {
 	if err := scheme.Convert(versioned, config, nil); err != nil {
 		return nil, err
 	}
+	//默认配置项
 	applyLegacyDefaults(config)
 	return config, nil
 }
@@ -445,7 +447,7 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 // AddKubeletConfigFlags adds flags for a specific kubeletconfig.KubeletConfiguration to the specified FlagSet
 // 将KubeConfiguration配置项绑定指定的命名行参数，添加到标志集.
 // 为了向后兼容, kubelet仍然可以通过命令行参数传递KubeletConfigration中的配置项(优先级高于KubeletConfiguration).但这些命令行参数已经
-// 被标记为废弃，不要传递。而是应写到`--config`指定的KubeletConfiguration配置文件中
+// 被标记为废弃，后续版本可能会被移除，不要传递。而是应写到`--config`指定的KubeletConfiguration配置文件中
 func AddKubeletConfigFlags(mainfs *pflag.FlagSet, c *kubeletconfig.KubeletConfiguration) {
 	fs := pflag.NewFlagSet("", pflag.ExitOnError)
 	defer func() {

@@ -242,20 +242,20 @@ type Dependencies struct {
 	// Injected Dependencies
 	Auth                    server.AuthInterface //kubelet server的验证接口
 	CAdvisorInterface       cadvisor.Interface
-	Cloud                   cloudprovider.Interface
+	Cloud                   cloudprovider.Interface //云提供上接口
 	ContainerManager        cm.ContainerManager
 	DockerClientConfig      *dockershim.ClientConfig // dockershim的客户端配置
 	EventClient             v1core.EventsGetter      // 事件客户端
 	HeartbeatClient         clientset.Interface
 	OnHeartbeatFailure      func()
 	KubeClient              clientset.Interface // 和apiserver通信，通过kubeconfig配置构建
-	Mounter                 mount.Interface
-	HostUtil                hostutil.HostUtils
+	Mounter                 mount.Interface     // 挂载相关的操作
+	HostUtil                hostutil.HostUtils  // 提供文件的主机操作(如挂载,文件系统等)
 	OOMAdjuster             *oom.OOMAdjuster
 	OSInterface             kubecontainer.OSInterface
-	PodConfig               *config.PodConfig
-	Recorder                record.EventRecorder // 事件源
-	Subpather               subpath.Interface
+	PodConfig               *config.PodConfig               // 多路pod变更通知器，当Pod变更时
+	Recorder                record.EventRecorder            // 事件源
+	Subpather               subpath.Interface               // bind mount相关操作
 	VolumePlugins           []volume.VolumePlugin           // 支持的卷插件
 	DynamicPluginProber     volume.DynamicPluginProber      // flex volume卷插件动态发现目录
 	TLSOptions              *server.TLSOptions              // kubelet https server tls配置。包含验证kubelet证书。用来启动kubelet https server.
@@ -284,12 +284,15 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 	cfg := config.NewPodConfig(config.PodConfigNotificationIncremental, kubeDeps.Recorder)
 
 	// define file config source
+	//静态路径pod来源
 	if kubeCfg.StaticPodPath != "" {
 		klog.Infof("Adding pod path: %v", kubeCfg.StaticPodPath)
+		// 启动文件监听器，监听指定目录下的manifest变动，并通过config的chan来通知
 		config.NewSourceFile(kubeCfg.StaticPodPath, nodeName, kubeCfg.FileCheckFrequency.Duration, cfg.Channel(kubetypes.FileSource))
 	}
 
 	// define url config source
+	//静态url pod来源
 	if kubeCfg.StaticPodURL != "" {
 		klog.Infof("Adding pod url %q with HTTP header %v", kubeCfg.StaticPodURL, manifestURLHeader)
 		config.NewSourceURL(kubeCfg.StaticPodURL, manifestURLHeader, nodeName, kubeCfg.HTTPCheckFrequency.Duration, cfg.Channel(kubetypes.HTTPSource))
@@ -309,6 +312,7 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 		}
 	}
 
+	// 监听apiserver的资源
 	if kubeDeps.KubeClient != nil {
 		klog.Info("Adding apiserver pod source")
 		if updatechannel == nil {
@@ -1427,6 +1431,7 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 }
 
 // Run starts the kubelet reacting to config updates
+// updates:  apiserver/manifest path/manifest url来源的Pod事件
 func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 	if kl.logServer == nil {
 		kl.logServer = http.StripPrefix("/logs/", http.FileServer(http.Dir("/var/log/")))
@@ -1855,6 +1860,7 @@ func (kl *Kubelet) canRunPod(pod *v1.Pod) lifecycle.PodAdmitResult {
 // any new change seen, will run a sync against desired state and running state. If
 // no changes are seen to the configuration, will synchronize the last known desired
 // state every sync-frequency seconds. Never returns.
+// updates:  apiserver/manifest path/manifest url来源的Pod事件
 func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHandler) {
 	klog.Info("Starting kubelet main sync loop.")
 	// The syncTicker wakes up kubelet to checks if there are any pod workers
@@ -1932,6 +1938,7 @@ func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHand
 func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handler SyncHandler,
 	syncCh <-chan time.Time, housekeepingCh <-chan time.Time, plegCh <-chan *pleg.PodLifecycleEvent) bool {
 	select {
+	// 接收到某个配置源(apiserver,manifest pod, manifest url)的Pod事件
 	case u, open := <-configCh:
 		// Update from a config source; dispatch it to the right handler
 		// callback.
@@ -1954,6 +1961,7 @@ func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handle
 		case kubetypes.REMOVE:
 			klog.V(2).Infof("SyncLoop (REMOVE, %q): %q", u.Source, format.Pods(u.Pods))
 			handler.HandlePodRemoves(u.Pods)
+			// RECONCILE事件
 		case kubetypes.RECONCILE:
 			klog.V(4).Infof("SyncLoop (RECONCILE, %q): %q", u.Source, format.Pods(u.Pods))
 			handler.HandlePodReconcile(u.Pods)

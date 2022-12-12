@@ -50,7 +50,7 @@ const (
 // kubelet is running in the host's root mount namespace.
 type Mounter struct {
 	mounterPath string
-	withSystemd bool
+	withSystemd bool // 检测systemd是否正常安装且运行
 }
 
 // New returns a mount.Interface for the current system.
@@ -158,6 +158,7 @@ func (mounter *Mounter) doMount(mounterPath string, mountCmd string, source stri
 // (permission errors, ...), it returns false.
 // There may be different ways how to detect systemd, this one makes sure that
 // systemd-runs (needed by Mount()) works.
+// 检测systemd是否存在且应用于系统中
 func detectSystemd() bool {
 	if _, err := exec.LookPath("systemd-run"); err != nil {
 		klog.V(2).Infof("Detected OS without systemd")
@@ -168,6 +169,7 @@ func detectSystemd() bool {
 	// which happens when running in a container with a systemd-based image
 	// but with different pid 1.
 	cmd := exec.Command("systemd-run", "--description=Kubernetes systemd probe", "--scope", "true")
+	// 正确执行后结果为:Running as unit run-r5bda820dc34c48149c9145da6e8087fe.service.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		klog.V(2).Infof("Cannot run systemd-run, assuming non-systemd OS")

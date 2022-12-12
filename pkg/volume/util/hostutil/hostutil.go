@@ -75,6 +75,7 @@ type HostUtils interface {
 var _ HostUtils = &HostUtil{}
 
 // getFileType checks for file/directory/socket and block/character devices.
+// 获取文件类型(目录，符号连接，块设备等)
 func getFileType(pathname string) (FileType, error) {
 	var pathType FileType
 	info, err := os.Stat(pathname)

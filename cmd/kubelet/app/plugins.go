@@ -19,14 +19,11 @@ package app
 // This file exists to force the desired plugin implementations to be linked.
 import (
 	// Credential providers
+	"k8s.io/component-base/featuregate"
+	_ "k8s.io/kubernetes/pkg/cloudprovider/providers"
 	_ "k8s.io/kubernetes/pkg/credentialprovider/aws"
 	_ "k8s.io/kubernetes/pkg/credentialprovider/azure"
 	_ "k8s.io/kubernetes/pkg/credentialprovider/gcp"
-
-	"k8s.io/component-base/featuregate"
-	"k8s.io/utils/exec"
-
-	// Volume plugins
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/cephfs"
 	"k8s.io/kubernetes/pkg/volume/configmap"
@@ -48,10 +45,8 @@ import (
 	"k8s.io/kubernetes/pkg/volume/rbd"
 	"k8s.io/kubernetes/pkg/volume/scaleio"
 	"k8s.io/kubernetes/pkg/volume/secret"
-	"k8s.io/kubernetes/pkg/volume/storageos"
-
-	// Cloud providers
-	_ "k8s.io/kubernetes/pkg/cloudprovider/providers"
+	"k8s.io/kubernetes/pkg/volume/storageos" // Cloud providers
+	"k8s.io/utils/exec"                      // Volume plugins
 )
 
 // ProbeVolumePlugins collects all volume plugins into an easy to use list.
@@ -67,12 +62,15 @@ func ProbeVolumePlugins(featureGate featuregate.FeatureGate) ([]volume.VolumePlu
 	// Kubelet does not currently need to configure volume plugins.
 	// If/when it does, see kube-controller-manager/app/plugins.go for example of using volume.VolumeConfig
 	var err error
+	//老版本内置的gce等卷插件
 	allPlugins, err = appendLegacyProviderVolumes(allPlugins, featureGate)
 	if err != nil {
 		return allPlugins, err
 	}
+	// 空目录卷插件
 	allPlugins = append(allPlugins, emptydir.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, git_repo.ProbeVolumePlugins()...)
+	// 主机挂载卷插件
 	allPlugins = append(allPlugins, hostpath.ProbeVolumePlugins(volume.VolumeConfig{})...)
 	allPlugins = append(allPlugins, nfs.ProbeVolumePlugins(volume.VolumeConfig{})...)
 	allPlugins = append(allPlugins, secret.ProbeVolumePlugins()...)
@@ -84,12 +82,15 @@ func ProbeVolumePlugins(featureGate featuregate.FeatureGate) ([]volume.VolumePlu
 	allPlugins = append(allPlugins, downwardapi.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, fc.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, flocker.ProbeVolumePlugins()...)
+	// configmap卷插件
 	allPlugins = append(allPlugins, configmap.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, projected.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, portworx.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, scaleio.ProbeVolumePlugins()...)
+	// local卷插件,和hostpath的功能有点像
 	allPlugins = append(allPlugins, local.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, storageos.ProbeVolumePlugins()...)
+	// csi卷插件
 	allPlugins = append(allPlugins, csi.ProbeVolumePlugins()...)
 	return allPlugins, nil
 }

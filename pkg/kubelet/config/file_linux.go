@@ -26,11 +26,10 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"k8s.io/klog"
-
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/klog"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 )
 
@@ -65,6 +64,7 @@ func (s *sourceFile) startWatch() {
 	}, retryPeriod)
 }
 
+// 通过inotify监听指定路径文件的变化，
 func (s *sourceFile) doWatch() error {
 	_, err := os.Stat(s.path)
 	if err != nil {
@@ -126,6 +126,7 @@ func (s *sourceFile) produceWatchEvent(e *fsnotify.Event) error {
 	return nil
 }
 
+// 根据inotify通知的文件事件更新本地缓存
 func (s *sourceFile) consumeWatchEvent(e *watchEvent) error {
 	switch e.eventType {
 	case podAdd, podModify:
@@ -135,6 +136,7 @@ func (s *sourceFile) consumeWatchEvent(e *watchEvent) error {
 		}
 		return s.store.Add(pod)
 	case podDelete:
+		//如果指定文件粗
 		if objKey, keyExist := s.fileKeyMapping[e.fileName]; keyExist {
 			pod, podExist, err := s.store.GetByKey(objKey)
 			if err != nil {

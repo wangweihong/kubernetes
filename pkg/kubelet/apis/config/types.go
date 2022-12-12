@@ -82,7 +82,7 @@ type KubeletConfiguration struct {
 	SyncFrequency metav1.Duration
 	// fileCheckFrequency is the duration between checking config files for
 	// new data
-	FileCheckFrequency metav1.Duration //静态文件更新检测频率。用于同步staticPodPath中的manifests
+	FileCheckFrequency metav1.Duration //静态文件更新检测频率。用于定时同步staticPodPath中的manifests.默认为10秒
 	// httpCheckFrequency is the duration between checking http for new data
 	HTTPCheckFrequency metav1.Duration
 	// staticPodURL is the URL for accessing static pods to run

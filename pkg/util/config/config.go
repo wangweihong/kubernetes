@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+//合并器。当某个源接收到发送过来的更新时,调用合并器进行合并更新的数据。
 type Merger interface {
 	// Invoked when a change from a source is received.  May also function as an incremental
 	// merger if you wish to consume changes incrementally.  Must be reentrant when more than
@@ -38,14 +39,18 @@ func (f MergeFunc) Merge(source string, update interface{}) error {
 
 // Mux is a class for merging configuration from multiple sources.  Changes are
 // pushed via channels and sent to the merge function.
+// Mux是一个多源接收器, 为不同源启动各自的监听携程。
+// 当某个源通过监听通道接收到更新时,
 type Mux struct {
 	// Invoked when an update is sent to a source.
-	merger Merger
+	merger Merger //对所有来源的pod事件进行合并处理(如缓存到本地后)再统一广播
 
 	// Sources and their lock.
 	sourceLock sync.RWMutex
 	// Maps source names to channels
-	sources map[string]chan interface{}
+	sources map[string]chan interface{} //用于记录不同来源的监听通道。key为源名。value是监听通道。每个源添加时，都会启动一个监听携程监听通道的信号。
+	// 当接收到该chan的Pod事件后, 再调用merger进行合并后广播
+
 }
 
 // NewMux creates a new mux that can merge changes from multiple sources.
@@ -62,22 +67,29 @@ func NewMux(merger Merger) *Mux {
 // source will return the same channel. This allows change and state based sources
 // to use the same channel. Different source names however will be treated as a
 // union.
+// 获取指定源的监听通道,如果指定源不存在, 则创建一个该源的监听通道，并且启动一个携程进行监听。
 func (m *Mux) Channel(source string) chan interface{} {
 	if len(source) == 0 {
 		panic("Channel given an empty name")
 	}
 	m.sourceLock.Lock()
 	defer m.sourceLock.Unlock()
+	//如果源已存在,则返回监听通道
 	channel, exists := m.sources[source]
 	if exists {
 		return channel
 	}
 	newChannel := make(chan interface{})
 	m.sources[source] = newChannel
-	go wait.Until(func() { m.listen(source, newChannel) }, 0, wait.NeverStop)
+	// 启动监听协程
+	go wait.Until(func() {
+		// 当接收到源通道发来的Pod更新事件时，调用合并器进行合并
+		m.listen(source, newChannel)
+	}, 0, wait.NeverStop)
 	return newChannel
 }
 
+// 当接收到源通道发来的更新事件时，调用合并器进行合并
 func (m *Mux) listen(source string, listenChannel <-chan interface{}) {
 	for update := range listenChannel {
 		m.merger.Merge(source, update)

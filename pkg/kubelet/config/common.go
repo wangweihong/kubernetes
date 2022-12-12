@@ -28,22 +28,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/api/legacyscheme" // Ensure that core apis are installed
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
-	"k8s.io/kubernetes/pkg/features"
-
-	// TODO: remove this import if
-	// api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String() is changed
-	// to "v1"?
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
-	// Ensure that core apis are installed
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/pkg/features" // TODO: remove this import if
+	// api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String() is changed
+	// to "v1"?
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/util/hash"
-
-	"k8s.io/klog"
 )
 
 const (
@@ -55,7 +51,10 @@ func generatePodName(name string, nodeName types.NodeName) string {
 	return fmt.Sprintf("%s-%s", name, strings.ToLower(string(nodeName)))
 }
 
+// 填充pod的默认信息
 func applyDefaults(pod *api.Pod, source string, isFile bool, nodeName types.NodeName) error {
+	// 生成pod的UID
+	// 这意味着如果Pod(静态文件创建的Pod)可以指定UID?
 	if len(pod.UID) == 0 {
 		hasher := md5.New()
 		if isFile {
@@ -87,7 +86,7 @@ func applyDefaults(pod *api.Pod, source string, isFile bool, nodeName types.Node
 	}
 	// The generated UID is the hash of the file.
 	pod.Annotations[kubetypes.ConfigHashAnnotationKey] = string(pod.UID)
-
+	//来源于静态文件的StaticPod
 	if isFile {
 		// Applying the default Taint tolerations to static pods,
 		// so they are not evicted when there are node problems.
@@ -114,6 +113,7 @@ func getSelfLink(name, namespace string) string {
 type defaultFunc func(pod *api.Pod) error
 
 // tryDecodeSinglePod takes data and tries to extract valid Pod config information from it.
+// 通过yaml数据解析到Pod对象
 func tryDecodeSinglePod(data []byte, defaultFn defaultFunc) (parsed bool, pod *v1.Pod, err error) {
 	// JSON is valid YAML, so this should work for everything.
 	json, err := utilyaml.ToJSON(data)
@@ -132,6 +132,7 @@ func tryDecodeSinglePod(data []byte, defaultFn defaultFunc) (parsed bool, pod *v
 	}
 
 	// Apply default values and validate the pod.
+	// 给创建的Pod对象填充默认值，如UID,状态等
 	if err = defaultFn(newPod); err != nil {
 		return true, pod, err
 	}

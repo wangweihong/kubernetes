@@ -25,7 +25,7 @@ package cache
 // PushFunc should be thread safe.
 type UndeltaStore struct {
 	Store
-	PushFunc func([]interface{})
+	PushFunc func([]interface{}) //当Store发生增、删、改、替换时间时执行该函数推送当前缓存中的对象列表
 }
 
 // Assert that it implements the Store interface.

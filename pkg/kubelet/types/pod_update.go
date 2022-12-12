@@ -36,28 +36,33 @@ type PodOperation int
 
 const (
 	// This is the current pod configuration
+	// Set用来告知某个pod来源已经就绪
 	SET PodOperation = iota
 	// Pods with the given ids are new to this source
 	ADD
 	// Pods with the given ids are gracefully deleted from this source
+	// 表明某个Pod设置DeletionTimestamp
 	DELETE
 	// Pods with the given ids have been removed from this source
 	REMOVE
 	// Pods with the given ids have been updated in this source
+	// 通常表明Pod的spec,label,annotation发生了变化
 	UPDATE
 	// Pods with the given ids have unexpected status in this source,
 	// kubelet should reconcile status with this source
+	// reconcile通常表示Pod的状态发生了变化.如果某个Pod spec和status都发生了变化, 事件也为Reconcile
 	RECONCILE
 	// Pods with the given ids have been restored from a checkpoint.
 	RESTORE
 
 	// These constants identify the sources of pods
 	// Updates from a file
-	FileSource = "file"
+	// pod的各种来源。kubelet会起协程监听这些来源中Pod变化。
+	FileSource = "file" // manifest path
 	// Updates from querying a web page
-	HTTPSource = "http"
+	HTTPSource = "http" // manifest url
 	// Updates from Kubernetes API Server
-	ApiserverSource = "api"
+	ApiserverSource = "api" // apiserver
 	// Updates from all sources
 	AllSource = "*"
 
@@ -74,9 +79,9 @@ const (
 // functionally similar, this helps our unit tests properly check that the correct PodUpdates
 // are generated.
 type PodUpdate struct {
-	Pods   []*v1.Pod
-	Op     PodOperation
-	Source string
+	Pods   []*v1.Pod    // 哪些Pod发生了变化
+	Op     PodOperation // 变化的动作
+	Source string       // pod来源(apiserver、file、http)
 }
 
 // Gets all validated sources from the specified sources.

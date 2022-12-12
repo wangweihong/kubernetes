@@ -28,6 +28,7 @@ import (
 )
 
 // Loader loads configuration from a storage layer
+// 负责加载kubelet配置
 type Loader interface {
 	// Load loads and returns the KubeletConfiguration from the storage layer, or an error if a configuration could not be loaded
 	Load() (*kubeletconfig.KubeletConfiguration, error)
@@ -36,11 +37,11 @@ type Loader interface {
 // fsLoader loads configuration from `configDir`
 type fsLoader struct {
 	// fs is the filesystem where the config files exist; can be mocked for testing
-	fs utilfs.Filesystem
+	fs utilfs.Filesystem // 主机层文件系统接口
 	// kubeletCodecs is the scheme used to decode config files
-	kubeletCodecs *serializer.CodecFactory
+	kubeletCodecs *serializer.CodecFactory // 将kubelet config配置解码到对象
 	// kubeletFile is an absolute path to the file containing a serialized KubeletConfiguration
-	kubeletFile string
+	kubeletFile string //kubelet config file路径
 }
 
 // NewFsLoader returns a Loader that loads a KubeletConfiguration from the `kubeletFile`

@@ -41,6 +41,7 @@ type PodConfigNotificationMode int
 const (
 	// PodConfigNotificationUnknown is the default value for
 	// PodConfigNotificationMode when uninitialized.
+	//通知模式，PodStorage会根据通知模式，决定来自Pod源的事件怎么处理
 	PodConfigNotificationUnknown = iota
 	// PodConfigNotificationSnapshot delivers the full configuration as a SET whenever
 	// any change occurs.
@@ -49,22 +50,24 @@ const (
 	// changed, and a SET message if there are any additions or removals.
 	PodConfigNotificationSnapshotAndUpdates
 	// PodConfigNotificationIncremental delivers ADD, UPDATE, DELETE, REMOVE, RECONCILE to the update channel.
+
 	PodConfigNotificationIncremental
 )
 
 // PodConfig is a configuration mux that merges many sources of pod configuration into a single
 // consistent structure, and then delivers incremental change notifications to listeners
 // in order.
+// 通过mux聚合多个不同来源的Pod的变化(apiserver,static path),并通过updates发给监听器
 type PodConfig struct {
-	pods *podStorage
-	mux  *config.Mux
+	pods *podStorage // podStorage提供了合并mux中各个监听通道的Pod事件，并缓存Pod。并根据不同模式更改Pod事件
+	mux  *config.Mux // 多路接收器，负责提供不同监听源的监听通道
 
 	// the channel of denormalized changes passed to listeners
-	updates chan kubetypes.PodUpdate
+	updates chan kubetypes.PodUpdate // 用于将podStorage合并后的Pod事件广播给给监听器
 
 	// contains the list of all configured sources
 	sourcesLock       sync.Mutex
-	sources           sets.String
+	sources           sets.String //记录已配置的监听源
 	checkpointManager checkpointmanager.CheckpointManager
 }
 
@@ -84,6 +87,7 @@ func NewPodConfig(mode PodConfigNotificationMode, recorder record.EventRecorder)
 
 // Channel creates or returns a config source channel.  The channel
 // only accepts PodUpdates
+// 获取某个源的监听通道, 如果不存在，则创建一个源并返回其监听通道
 func (c *PodConfig) Channel(source string) chan<- interface{} {
 	c.sourcesLock.Lock()
 	defer c.sourcesLock.Unlock()
@@ -102,6 +106,8 @@ func (c *PodConfig) SeenAllSources(seenSources sets.String) bool {
 }
 
 // Updates returns a channel of updates to the configuration, properly denormalized.
+// 返回PodConfig的更新通道, 监听器可以监听该通道获取不同源的Pod的变化
+// podConfig会聚合不同源的Pod变化，通过该chan进行广播
 func (c *PodConfig) Updates() <-chan kubetypes.PodUpdate {
 	return c.updates
 }
@@ -136,18 +142,17 @@ func (c *PodConfig) Restore(path string, updates chan<- interface{}) error {
 type podStorage struct {
 	podLock sync.RWMutex
 	// map of source name to pod uid to pod reference
-	pods map[string]map[types.UID]*v1.Pod
-	mode PodConfigNotificationMode
+	pods map[string]map[types.UID]*v1.Pod //不同监听源的Pod列表.如apiserver源，或者静态文件目录
+	mode PodConfigNotificationMode        // 根据模式来生成转发事件
 
 	// ensures that updates are delivered in strict order
 	// on the updates channel
 	updateLock sync.Mutex
-	updates    chan<- kubetypes.PodUpdate
+	updates    chan<- kubetypes.PodUpdate // 将接收到的pod事件处理后转发
 
 	// contains the set of all sources that have sent at least one SET
 	sourcesSeenLock sync.RWMutex
-	sourcesSeen     sets.String
-
+	sourcesSeen     sets.String // 每当指定源接收到SET事件，就会将源插入该表中.SET信号除了重置本地缓存所有Pod之外, 还有告知源就绪的功能
 	// the EventRecorder to use
 	recorder record.EventRecorder
 }
@@ -168,12 +173,15 @@ func newPodStorage(updates chan<- kubetypes.PodUpdate, mode PodConfigNotificatio
 // Merge normalizes a set of incoming changes from different sources into a map of all Pods
 // and ensures that redundant changes are filtered out, and then pushes zero or more minimal
 // updates onto the update channel.  Ensures that updates are delivered in order.
+// kubelet Pod来源(apiserver、file、url)都会启动一个listen chan, 当有Pod事件发生时，就会调用podStorage的Merge
 func (s *podStorage) Merge(source string, change interface{}) error {
 	s.updateLock.Lock()
 	defer s.updateLock.Unlock()
-
+	// 指定源之前是否已经接收过SET事件
 	seenBefore := s.sourcesSeen.Has(source)
+	// 根据到来的事件，更新指定来源的Pod本地缓存数据。并记录需要处理的pod
 	adds, updates, deletes, removes, reconciles, restores := s.merge(source, change)
+	// 指定源第一次接收到SET事件
 	firstSet := !seenBefore && s.sourcesSeen.Has(source)
 
 	// deliver update notifications
@@ -230,17 +238,20 @@ func (s *podStorage) Merge(source string, change interface{}) error {
 	return nil
 }
 
+// change为kubetypes.PodUpdate. 描述某个来源的哪些Pod发生了哪些变化
+// 根据到来的事件，更新指定来源的Pod本地缓存数据。并记录需要处理的pod
 func (s *podStorage) merge(source string, change interface{}) (adds, updates, deletes, removes, reconciles, restores *kubetypes.PodUpdate) {
 	s.podLock.Lock()
 	defer s.podLock.Unlock()
 
-	addPods := []*v1.Pod{}
-	updatePods := []*v1.Pod{}
-	deletePods := []*v1.Pod{}
-	removePods := []*v1.Pod{}
-	reconcilePods := []*v1.Pod{}
-	restorePods := []*v1.Pod{}
+	addPods := []*v1.Pod{}       //记录新增的pod
+	updatePods := []*v1.Pod{}    //记录spec改动的pod
+	deletePods := []*v1.Pod{}    //记录设置了deletetimestamp的pod
+	removePods := []*v1.Pod{}    // 通过REMOVE事件要求删除的，且在本地存在的Pod列表
+	reconcilePods := []*v1.Pod{} //记录需要修改状态(即pod spec,label,annotation等相同)的Pod
+	restorePods := []*v1.Pod{}   //接收到Restore事件的Pod
 
+	//获取指定源的Pod列表
 	pods := s.pods[source]
 	if pods == nil {
 		pods = make(map[types.UID]*v1.Pod)
@@ -249,21 +260,32 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 	// updatePodFunc is the local function which updates the pod cache *oldPods* with new pods *newPods*.
 	// After updated, new pod will be stored in the pod cache *pods*.
 	// Notice that *pods* and *oldPods* could be the same cache.
+	// 比较已存在的Pod和新Pod,根据spec/label/annotation/status/deletationTimpstamp决定pod做何种处理
+	// 根据pod的处理更新已存在的pod,并且记录到pods表中
+	// oldPods和Pods是同一个意味着更新(添加不存在部分).oldPods和Pods不是同一个时，意味着只保留newPods部分。
+	// 这个函数的作用除了更新缓存以外的主要功能是记录需要进行不同处理的Pod列表
 	updatePodsFunc := func(newPods []*v1.Pod, oldPods, pods map[types.UID]*v1.Pod) {
+		//过滤掉同名pod
 		filtered := filterInvalidPods(newPods, source, s.recorder)
 		for _, ref := range filtered {
 			// Annotate the pod with the source before any comparison.
 			if ref.Annotations == nil {
 				ref.Annotations = make(map[string]string)
 			}
-			ref.Annotations[kubetypes.ConfigSourceAnnotationKey] = source
+			ref.Annotations[kubetypes.ConfigSourceAnnotationKey] = source //记录pod的来源到annotations
+			// pod如果之前已经存在，根据pod的状态决定更新spec还是删除，reconcile调整状态
 			if existing, found := oldPods[ref.UID]; found {
 				pods[ref.UID] = existing
+				//比较已存在的Pod的Spec,label,annotation,status来决定一个Pod是要何种处理
+				// 并且更新existing pod
 				needUpdate, needReconcile, needGracefulDelete := checkAndUpdatePod(existing, ref)
+				// pod的spec/label/annotation发生了变化
 				if needUpdate {
 					updatePods = append(updatePods, existing)
+					// pod的status发生了变化
 				} else if needReconcile {
 					reconcilePods = append(reconcilePods, existing)
+					//pod设置了deletionTimestamp
 				} else if needGracefulDelete {
 					deletePods = append(deletePods, existing)
 				}
@@ -285,10 +307,15 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 		} else {
 			klog.V(4).Infof("Updating pods from source %s : %v", source, update.Pods)
 		}
+		// 对比事件带来的Pod列表,
+		// 1. 不存在本地缓存的，添加到本地缓存
+		// 2. 已存在本地缓存的，则更新
+		// 3. DELETE事件，并不表示删除某个Pod。而是表示某个Pod设置了DeleteTimestamp.
 		updatePodsFunc(update.Pods, pods, pods)
 
 	case kubetypes.REMOVE:
 		klog.V(4).Infof("Removing pods from source %s : %v", source, update.Pods)
+		// 如果事件明确要移除的Pod存在本地，则清掉本地缓存存在的Pod
 		for _, value := range update.Pods {
 			if existing, found := pods[value.UID]; found {
 				// this is a delete
@@ -299,8 +326,10 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 			// this is a no-op
 		}
 
+	// 清除本地缓存pod列表, 使用新的Pod列表替换本地缓存
 	case kubetypes.SET:
 		klog.V(4).Infof("Setting pods for source %s", source)
+		//用于表明该源已经执行过一次SET操作
 		s.markSourceSet(source)
 		// Clear the old map entries by just creating a new map
 		oldPods := pods
@@ -312,6 +341,9 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 				removePods = append(removePods, existing)
 			}
 		}
+
+		//不影响本地缓存
+		// 只记录
 	case kubetypes.RESTORE:
 		klog.V(4).Infof("Restoring pods for source %s", source)
 		restorePods = append(restorePods, update.Pods...)
@@ -323,6 +355,8 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 
 	s.pods[source] = pods
 
+	//重新组成PodUpdate事件？
+	//那本地缓存的意义？
 	adds = &kubetypes.PodUpdate{Op: kubetypes.ADD, Pods: copyPods(addPods), Source: source}
 	updates = &kubetypes.PodUpdate{Op: kubetypes.UPDATE, Pods: copyPods(updatePods), Source: source}
 	deletes = &kubetypes.PodUpdate{Op: kubetypes.DELETE, Pods: copyPods(deletePods), Source: source}
@@ -333,18 +367,22 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 	return adds, updates, deletes, removes, reconciles, restores
 }
 
+//当某个源发送了SET事件后，则添加到sourceSeen表中
 func (s *podStorage) markSourceSet(source string) {
 	s.sourcesSeenLock.Lock()
 	defer s.sourcesSeenLock.Unlock()
 	s.sourcesSeen.Insert(source)
 }
 
+// 是否已经接收过全部source发送过来的SET事件
+// SET信号有告知该源就绪的作用
 func (s *podStorage) seenSources(sources ...string) bool {
 	s.sourcesSeenLock.RLock()
 	defer s.sourcesSeenLock.RUnlock()
 	return s.sourcesSeen.HasAll(sources...)
 }
 
+//过滤掉同名Pod
 func filterInvalidPods(pods []*v1.Pod, source string, recorder record.EventRecorder) (filtered []*v1.Pod) {
 	names := sets.String{}
 	for i, pod := range pods {
@@ -445,15 +483,18 @@ func podsDifferSemantically(existing, ref *v1.Pod) bool {
 //   * if ref makes no meaningful change, but changes the pod status, returns needReconcile=true
 //   * else return all false
 //   Now, needUpdate, needGracefulDelete and needReconcile should never be both true
+// 对比existing和ref pod的spec/label/annotation等决定需要做何种处理，并更新exiting pod
 func checkAndUpdatePod(existing, ref *v1.Pod) (needUpdate, needReconcile, needGracefulDelete bool) {
 
 	// 1. this is a reconcile
 	// TODO: it would be better to update the whole object and only preserve certain things
 	//       like the source annotation or the UID (to ensure safety)
+	// 检测已存在的Pod和ref是否podspec,annotation,label,deletationTimestamp相同
 	if !podsDifferSemantically(existing, ref) {
 		// this is not an update
 		// Only check reconcile when it is not an update, because if the pod is going to
 		// be updated, an extra reconcile is unnecessary
+		//比较已存在的Pod和ref的status是否相同
 		if !reflect.DeepEqual(existing.Status, ref.Status) {
 			// Pod with changed pod status needs reconcile, because kubelet should
 			// be the source of truth of pod status.
@@ -486,6 +527,7 @@ func checkAndUpdatePod(existing, ref *v1.Pod) (needUpdate, needReconcile, needGr
 }
 
 // Sync sends a copy of the current state through the update channel.
+// 发送一个包含本地缓存所有Pod的SET事件到UpdatesChan
 func (s *podStorage) Sync() {
 	s.updateLock.Lock()
 	defer s.updateLock.Unlock()
@@ -493,6 +535,7 @@ func (s *podStorage) Sync() {
 }
 
 // Object implements config.Accessor
+// 拷贝本地缓存中所有源的Pod
 func (s *podStorage) MergedState() interface{} {
 	s.podLock.RLock()
 	defer s.podLock.RUnlock()
