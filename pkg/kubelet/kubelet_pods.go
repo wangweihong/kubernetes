@@ -474,6 +474,8 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Contai
 	}
 	opts.Devices = append(opts.Devices, blkVolumes...)
 
+	// 1. 将根据pod的配置转换成环境变量，如pod的字段，引用configmap,引用secret
+	// 2. 将pod所在的命名空间的svc以及系统svc kubernetes(默认命名空间为default)转换成环境变量
 	envs, err := kl.makeEnvironmentVariables(pod, container, podIP, podIPs)
 	if err != nil {
 		return nil, nil, err
@@ -507,10 +509,18 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Contai
 	return opts, cleanupAction, nil
 }
 
+// kubernetes服务(该服务貌似由controller-manager负责创建管理、删除后会自动重建),该服务中包含访问apiserver的地址和端口
+// 这个服务会作为环境变量挂载到每个Pod。其中提供KUBERNETES_SERVICE_HOST和KUBERNETES_PORT环境变量供kubernetes client
+// 进行访问apiserver. 如果没有该环境变量, pod内部无法访问apiserver(因为默认会访问localhost:8080而失败).
+// 该服务是跨命名空间的。即使你在非kubernetes创建的Pod, 也会关联该服务。
 var masterServices = sets.NewString("kubernetes")
 
 // getServiceEnvVarMap makes a map[string]string of env vars for services a
 // pod in namespace ns should see.
+// 将指定命名空间下的服务以及系统级服务(kubernetes)的内容转换成环境变量表。
+// 如 kubernetes服务 生成环境变量 KUBERNETES_SERVICE_HOST、KUBERNETES_SERVICE_PORT
+// enableServiceLinks 用于指明是否将ns下的服务内容通过环境变量诸如到Pod中。
+// 但特别注意: 系统服务(kubernetes) 不受命名空间ns和enableServiceLinks标志的影响。一定会注入。
 func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[string]string, error) {
 	var (
 		serviceMap = make(map[string]*v1.Service)
@@ -523,6 +533,8 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 		// Kubelets without masters (e.g. plain GCE ContainerVM) don't set env vars.
 		return m, nil
 	}
+
+	//获取所有的service
 	services, err := kl.serviceLister.List(labels.Everything())
 	if err != nil {
 		return m, fmt.Errorf("failed to list services when setting up env vars")
@@ -532,6 +544,7 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 	for i := range services {
 		service := services[i]
 		// ignore services where ClusterIP is "None" or empty
+		// 忽略未包含clusterIP的service
 		if !v1helper.IsServiceIPSet(service) {
 			continue
 		}
@@ -541,6 +554,8 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 		// from the master service namespace, even if enableServiceLinks is false.
 		// We also add environment variables for other services in the same
 		// namespace, if enableServiceLinks is true.
+		// 记录同ns命名空间的svc和系统service.
+		// 这里指明只要存在kubernetes服务,不管是否在ns命名空间, kubernetes svc都要注入到Pod内部
 		if service.Namespace == kl.masterServiceNamespace && masterServices.Has(serviceName) {
 			if _, exists := serviceMap[serviceName]; !exists {
 				serviceMap[serviceName] = service
@@ -550,11 +565,14 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 		}
 	}
 
+	// 记录所有需要注入的Service列表
 	mappedServices := []*v1.Service{}
 	for key := range serviceMap {
 		mappedServices = append(mappedServices, serviceMap[key])
 	}
 
+	//将服务中的内容转换成环境变量
+	//如 kubernetes服务 生成环境变量 KUBERNETES_SERVICE_HOST、KUBERNETES_SERVICE_PORT
 	for _, e := range envvars.FromServices(mappedServices) {
 		m[e.Name] = e.Value
 	}
@@ -562,6 +580,8 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 }
 
 // Make the environment variables for a pod in the given namespace.
+// 1. 将根据pod的配置转换成环境变量，如pod的字段，引用configmap,引用secret
+// 2. 将pod所在的命名空间的svc以及系统svc kubernetes(默认命名空间为default)转换成环境变量
 func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container, podIP string, podIPs []string) ([]kubecontainer.EnvVar, error) {
 	if pod.Spec.EnableServiceLinks == nil {
 		return nil, fmt.Errorf("nil pod.spec.enableServiceLinks encountered, cannot construct envvars")
@@ -577,6 +597,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 	// To avoid this users can: (1) wait between starting a service and starting; or (2) detect
 	// missing service env var and exit and be restarted; or (3) use DNS instead of env vars
 	// and keep trying to resolve the DNS name of the service (recommended).
+	// 将指定命名空间下的服务以及系统级服务(kubernetes)的内容转换成环境变量表。
 	serviceEnv, err := kl.getServiceEnvVarMap(pod.Namespace, *pod.Spec.EnableServiceLinks)
 	if err != nil {
 		return result, err
@@ -592,6 +613,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 	// Process EnvFrom first then allow Env to replace existing values.
 	for _, envFrom := range container.EnvFrom {
 		switch {
+		// 环境变量来自ConfigMap
 		case envFrom.ConfigMapRef != nil:
 			cm := envFrom.ConfigMapRef
 			name := cm.Name
@@ -627,6 +649,8 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 				sort.Strings(invalidKeys)
 				kl.recorder.Eventf(pod, v1.EventTypeWarning, "InvalidEnvironmentVariableNames", "Keys [%s] from the EnvFrom configMap %s/%s were skipped since they are considered invalid environment variable names.", strings.Join(invalidKeys, ", "), pod.Namespace, name)
 			}
+
+			// 环境变量来自Secret
 		case envFrom.SecretRef != nil:
 			s := envFrom.SecretRef
 			name := s.Name
@@ -675,6 +699,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 	// 2.  Create the container's environment in the order variables are declared
 	// 3.  Add remaining service environment vars
 	var (
+		// 返回一个函数用于查找指定key在表中的值，如果不存在则返回$(key)
 		mappingFunc = expansion.MappingFuncFor(tmpEnv, serviceEnv)
 	)
 	for _, envVar := range container.Env {
@@ -685,6 +710,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 		} else if envVar.ValueFrom != nil {
 			// Step 1b: resolve alternate env var sources
 			switch {
+			//环境变量从指定pod字段中获取（即所谓的downwardAPI)
 			case envVar.ValueFrom.FieldRef != nil:
 				runtimeVal, err = kl.podFieldSelectorRuntimeValue(envVar.ValueFrom.FieldRef, pod, podIP, podIPs)
 				if err != nil {
@@ -699,6 +725,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 				if err != nil {
 					return result, err
 				}
+				// 环境变量来自ConfigMap
 			case envVar.ValueFrom.ConfigMapKeyRef != nil:
 				cm := envVar.ValueFrom.ConfigMapKeyRef
 				name := cm.Name
@@ -709,6 +736,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 					if kl.kubeClient == nil {
 						return result, fmt.Errorf("couldn't get configMap %v/%v, no kubeClient defined", pod.Namespace, name)
 					}
+					// 获取ConfigMap
 					configMap, err = kl.configMapManager.GetConfigMap(pod.Namespace, name)
 					if err != nil {
 						if errors.IsNotFound(err) && optional {
@@ -719,6 +747,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 					}
 					configMaps[name] = configMap
 				}
+				//将Config
 				runtimeVal, ok = configMap.Data[key]
 				if !ok {
 					if optional {
@@ -788,6 +817,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 // podFieldSelectorRuntimeValue returns the runtime value of the given
 // selector for a pod.
 func (kl *Kubelet) podFieldSelectorRuntimeValue(fs *v1.ObjectFieldSelector, pod *v1.Pod, podIP string, podIPs []string) (string, error) {
+	// 返回Pod支持作为环境变量来源的Pod字段。
 	internalFieldPath, _, err := podshelper.ConvertDownwardAPIFieldLabel(fs.APIVersion, fs.FieldPath, "")
 	if err != nil {
 		return "", err

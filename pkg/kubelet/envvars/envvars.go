@@ -29,6 +29,8 @@ import (
 // FromServices builds environment variables that a container is started with,
 // which tell the container where to find the services it may need, which are
 // provided as an argument.
+// 将service内容转换成环境变量
+// serviceA 生成环境变量 SERVICEA_SERVICE_HOST、SERVICEA_SERVICE_PORT
 func FromServices(services []*v1.Service) []v1.EnvVar {
 	var result []v1.EnvVar
 	for i := range services {
@@ -61,6 +63,7 @@ func FromServices(services []*v1.Service) []v1.EnvVar {
 	return result
 }
 
+// 字符串大写转换成环境变量
 func makeEnvVariableName(str string) string {
 	// TODO: If we simplify to "all names are DNS1123Subdomains" this
 	// will need two tweaks:
@@ -69,6 +72,7 @@ func makeEnvVariableName(str string) string {
 	return strings.ToUpper(strings.Replace(str, "-", "_", -1))
 }
 
+//将服务中的端口信息转换成环境变量
 func makeLinkVariables(service *v1.Service) []v1.EnvVar {
 	prefix := makeEnvVariableName(service.Name)
 	all := []v1.EnvVar{}

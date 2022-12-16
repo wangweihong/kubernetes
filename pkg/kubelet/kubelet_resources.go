@@ -19,9 +19,8 @@ package kubelet
 import (
 	"fmt"
 
-	"k8s.io/klog"
-
 	"k8s.io/api/core/v1"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/api/v1/resource"
 )
 
@@ -36,7 +35,7 @@ func (kl *Kubelet) defaultPodLimitsForDownwardAPI(pod *v1.Pod, container *v1.Con
 	if pod == nil {
 		return nil, nil, fmt.Errorf("invalid input, pod cannot be nil")
 	}
-
+	//
 	node, err := kl.getNodeAnyWay()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to find node object, expected a node")

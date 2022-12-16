@@ -185,7 +185,7 @@ type KubeletFlags struct {
 	MaxContainerCount int32
 	// masterServiceNamespace is The namespace from which the kubernetes
 	// master services should be injected into pods.
-	MasterServiceNamespace string
+	MasterServiceNamespace string // 需要SVC转成ENV中注入到Pod容器内部的命名空间，默认是default.目的其实是将k8s集群的访问地址端口告知Pod内部
 	// registerSchedulable tells the kubelet to register the node as
 	// schedulable. Won't have any effect if register-node is false.
 	// DEPRECATED: use registerWithTaints instead

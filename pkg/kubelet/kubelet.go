@@ -984,7 +984,7 @@ type Kubelet struct {
 	dnsConfigurer *dns.Configurer
 
 	// masterServiceNamespace is the namespace that the master service is exposed in.
-	masterServiceNamespace string
+	masterServiceNamespace string // 带有Kubernetes集群对外的访问地址和端口的Service(即Kubernetes Service)的命名空间.默认是default.该Service信息会被转成环境变量然后注入到kubelet启动的Pod内部。
 	// serviceLister knows how to list services
 	serviceLister serviceLister // 获取apiserver服务列表接口
 	// nodeLister knows how to list nodes

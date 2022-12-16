@@ -11,6 +11,7 @@ const (
 )
 
 // syntaxWrap returns the input string wrapped by the expansion syntax.
+// 返回$(xx)
 func syntaxWrap(input string) string {
 	return string(operator) + string(referenceOpener) + input + string(referenceCloser)
 }
@@ -19,6 +20,7 @@ func syntaxWrap(input string) string {
 // implements the expansion semantics defined in the expansion spec; it
 // returns the input string wrapped in the expansion syntax if no mapping
 // for the input is found.
+// 返回一个函数用于查找指定key在表中的值，如果不存在则返回$(key)
 func MappingFuncFor(context ...map[string]string) func(string) string {
 	return func(input string) string {
 		for _, vars := range context {
@@ -27,7 +29,7 @@ func MappingFuncFor(context ...map[string]string) func(string) string {
 				return val
 			}
 		}
-
+		// 返回$(xx)
 		return syntaxWrap(input)
 	}
 }
