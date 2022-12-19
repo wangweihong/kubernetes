@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	clientset "k8s.io/client-go/kubernetes"
-
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -59,13 +58,14 @@ type podStatusSyncRequest struct {
 
 // Updates pod statuses in apiserver. Writes only when new status has changed.
 // All methods are thread-safe.
+// 用来更新Pod的状态
 type manager struct {
 	kubeClient clientset.Interface
 	podManager kubepod.Manager
 	// Map from pod UID to sync status of the corresponding pod.
-	podStatuses      map[types.UID]versionedPodStatus
+	podStatuses      map[types.UID]versionedPodStatus // pod的状态
 	podStatusesLock  sync.RWMutex
-	podStatusChannel chan podStatusSyncRequest
+	podStatusChannel chan podStatusSyncRequest //用于接收Pod状态同步请求
 	// Map from (mirror) pod UID to latest status version successfully sent to the API server.
 	// apiStatusVersions must only be accessed from the sync thread.
 	apiStatusVersions map[kubetypes.MirrorPodUID]uint64
@@ -157,8 +157,9 @@ func (m *manager) Start() {
 
 	klog.Info("Starting to sync pod status with apiserver")
 	//lint:ignore SA1015 Ticker can link since this is only called once and doesn't handle termination.
-	syncTicker := time.Tick(syncPeriod)
+	syncTicker := time.Tick(syncPeriod) // 10秒定时器
 	// syncPod and syncBatch share the same go routine to avoid sync races.
+	// 为什么这里要用wait.Forever()?
 	go wait.Forever(func() {
 		for {
 			select {
@@ -166,7 +167,7 @@ func (m *manager) Start() {
 				klog.V(5).Infof("Status Manager: syncing pod: %q, with status: (%d, %v) from podStatusChannel",
 					syncRequest.podUID, syncRequest.status.version, syncRequest.status.status)
 				m.syncPod(syncRequest.podUID, syncRequest.status)
-			case <-syncTicker:
+			case <-syncTicker: //每隔10秒，将podStatusChan数据发送给posStatusChan
 				klog.V(5).Infof("Status Manager: syncing batch")
 				// remove any entries in the status channel since the batch will handle them
 				for i := len(m.podStatusChannel); i > 0; i-- {
@@ -190,6 +191,7 @@ func (m *manager) SetPodStatus(pod *v1.Pod, status v1.PodStatus) {
 	defer m.podStatusesLock.Unlock()
 
 	for _, c := range pod.Status.Conditions {
+		// 检测Pod中的状态condition是否由kubelet设置
 		if !kubetypes.PodConditionByKubelet(c.Type) {
 			klog.Errorf("Kubelet is trying to update pod condition %q for pod %q. "+
 				"But it is not owned by kubelet.", string(c.Type), format.Pod(pod))

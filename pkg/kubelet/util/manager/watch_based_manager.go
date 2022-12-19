@@ -22,10 +22,6 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
-
-	"k8s.io/klog"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -35,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
 )
 
@@ -70,11 +68,11 @@ func (i *objectCacheItem) stop() bool {
 // objectCache is a local cache of objects propagated via
 // individual watches.
 type objectCache struct {
-	listObject    listObjectFunc
-	watchObject   watchObjectFunc
-	newObject     newObjectFunc
-	isImmutable   isImmutableFunc
-	groupResource schema.GroupResource
+	listObject    listObjectFunc       // 获取执行类型对象列表函数
+	watchObject   watchObjectFunc      // 监听指定类型对象更新状态函数
+	newObject     newObjectFunc        // 创建新的指定类型对象函数
+	isImmutable   isImmutableFunc      // 用于检测对象是否不允许修改
+	groupResource schema.GroupResource //  指定对象资源组和资源名信息
 
 	lock  sync.RWMutex
 	items map[objectKey]*objectCacheItem

@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	storageetcd3 "k8s.io/apiserver/pkg/storage/etcd3"
-	"k8s.io/kubernetes/pkg/kubelet/util"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
+	storageetcd3 "k8s.io/apiserver/pkg/storage/etcd3"
+	"k8s.io/kubernetes/pkg/kubelet/util"
 )
 
 // GetObjectTTLFunc defines a function to get value of TTL.
@@ -46,16 +45,16 @@ type objectKey struct {
 
 // objectStoreItems is a single item stored in objectStore.
 type objectStoreItem struct {
-	refCount int
+	refCount int // 对象引用计数
 	data     *objectData
 }
 
 type objectData struct {
 	sync.Mutex
 
-	object         runtime.Object
+	object         runtime.Object // 对象数据
 	err            error
-	lastUpdateTime time.Time
+	lastUpdateTime time.Time // 指定对象最后一次更新时间
 }
 
 // objectStore is a local cache of objects.
@@ -64,10 +63,10 @@ type objectStore struct {
 	clock     clock.Clock
 
 	lock  sync.Mutex
-	items map[objectKey]*objectStoreItem
+	items map[objectKey]*objectStoreItem // key:  namespace/name
 
-	defaultTTL time.Duration
-	getTTL     GetObjectTTLFunc
+	defaultTTL time.Duration    //   默认对象过期时间
+	getTTL     GetObjectTTLFunc // 获取对象过期时间函数，替换defaultTTL
 }
 
 // NewObjectStore returns a new ttl-based instance of Store interface.
@@ -81,6 +80,7 @@ func NewObjectStore(getObject GetObjectFunc, clock clock.Clock, getTTL GetObject
 	}
 }
 
+// 新对象版本是否比老对象版本更老
 func isObjectOlder(newObject, oldObject runtime.Object) bool {
 	if newObject == nil || oldObject == nil {
 		return false
@@ -90,6 +90,7 @@ func isObjectOlder(newObject, oldObject runtime.Object) bool {
 	return newVersion < oldVersion
 }
 
+// 增加存储中指定对象的引用计数、不存在则创建
 func (s *objectStore) AddReference(namespace, name string) {
 	key := objectKey{namespace: namespace, name: name}
 
@@ -112,6 +113,7 @@ func (s *objectStore) AddReference(namespace, name string) {
 	item.data = nil
 }
 
+// 减少指定对象的引用计数、为0时则移除指定对象
 func (s *objectStore) DeleteReference(namespace, name string) {
 	key := objectKey{namespace: namespace, name: name}
 
@@ -127,6 +129,7 @@ func (s *objectStore) DeleteReference(namespace, name string) {
 
 // GetObjectTTLFromNodeFunc returns a function that returns TTL value
 // from a given Node object.
+// 用于指定节点上对象(如configmap)的有效期。如果对象最后更新时间+有效期早于当前时间，则认为对象已经过期。
 func GetObjectTTLFromNodeFunc(getNode func() (*v1.Node, error)) GetObjectTTLFunc {
 	return func() (time.Duration, bool) {
 		node, err := getNode()
@@ -144,8 +147,10 @@ func GetObjectTTLFromNodeFunc(getNode func() (*v1.Node, error)) GetObjectTTLFunc
 	}
 }
 
+//  当前时间内指定对象的最后更新时间是否仍未过期
 func (s *objectStore) isObjectFresh(data *objectData) bool {
 	objectTTL := s.defaultTTL
+	// 如果指定了过期时间函数, 则调用以获取
 	if ttl, ok := s.getTTL(); ok {
 		objectTTL = ttl
 	}
@@ -155,6 +160,7 @@ func (s *objectStore) isObjectFresh(data *objectData) bool {
 func (s *objectStore) Get(namespace, name string) (runtime.Object, error) {
 	key := objectKey{namespace: namespace, name: name}
 
+	// 从表中获取指定pod的对象数据
 	data := func() *objectData {
 		s.lock.Lock()
 		defer s.lock.Unlock()
@@ -167,6 +173,7 @@ func (s *objectStore) Get(namespace, name string) (runtime.Object, error) {
 		}
 		return item.data
 	}()
+	// 如果Pod不存在, 则表示pod并没有注册
 	if data == nil {
 		return nil, fmt.Errorf("object %q/%q not registered", namespace, name)
 	}
@@ -175,6 +182,7 @@ func (s *objectStore) Get(namespace, name string) (runtime.Object, error) {
 	// needed and return data.
 	data.Lock()
 	defer data.Unlock()
+	// 如果存储的对象有问题或者对象最后更新时间已经过期
 	if data.err != nil || !s.isObjectFresh(data) {
 		opts := metav1.GetOptions{}
 		if data.object != nil && data.err == nil {
@@ -211,7 +219,7 @@ type cacheBasedManager struct {
 	getReferencedObjects func(*v1.Pod) sets.String
 
 	lock           sync.Mutex
-	registeredPods map[objectKey]*v1.Pod
+	registeredPods map[objectKey]*v1.Pod // pod表
 }
 
 func (c *cacheBasedManager) GetObject(namespace, name string) (runtime.Object, error) {
@@ -241,6 +249,7 @@ func (c *cacheBasedManager) RegisterPod(pod *v1.Pod) {
 	}
 }
 
+//
 func (c *cacheBasedManager) UnregisterPod(pod *v1.Pod) {
 	var prev *v1.Pod
 	key := objectKey{namespace: pod.Namespace, name: pod.Name}

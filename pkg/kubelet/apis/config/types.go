@@ -79,12 +79,12 @@ type KubeletConfiguration struct {
 	StaticPodPath string //静态Pod路径 默认/etc/kubernetes/manifests
 	// syncFrequency is the max period between synchronizing running
 	// containers and config
-	SyncFrequency metav1.Duration
+	SyncFrequency metav1.Duration // 默认1分钟。有scheme KubeletConfiguration对象赋值，如果--kubeconfig没有该值设置或者设置为0秒，自动设为默认值1分钟
 	// fileCheckFrequency is the duration between checking config files for
 	// new data
 	FileCheckFrequency metav1.Duration //静态文件更新检测频率。用于定时同步staticPodPath中的manifests.默认为10秒
 	// httpCheckFrequency is the duration between checking http for new data
-	HTTPCheckFrequency metav1.Duration
+	HTTPCheckFrequency metav1.Duration //静态URL更新检测频率
 	// staticPodURL is the URL for accessing static pods to run
 	StaticPodURL string
 	// staticPodURLHeader is a map of slices with HTTP headers to use when accessing the podURL
@@ -303,7 +303,7 @@ type KubeletConfiguration struct {
 	// Maximum number of container log files that can be present for a container.
 	ContainerLogMaxFiles int32
 	// ConfigMapAndSecretChangeDetectionStrategy is a mode in which config map and secret managers are running.
-	ConfigMapAndSecretChangeDetectionStrategy ResourceChangeDetectionStrategy
+	ConfigMapAndSecretChangeDetectionStrategy ResourceChangeDetectionStrategy //默认策略是Watch
 	// A comma separated whitelist of unsafe sysctls or sysctl patterns (ending in *).
 	// Unsafe sysctl groups are kernel.shm*, kernel.msg*, kernel.sem, fs.mqueue.*, and net.*.
 	// These sysctls are namespaced but not allowed by default.  For example: "kernel.msg*,net.ipv4.route.min_pmtu"

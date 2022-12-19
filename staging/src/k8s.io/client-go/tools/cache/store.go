@@ -134,15 +134,16 @@ func SplitMetaNamespaceKey(key string) (namespace, name string, err error) {
 // associated KeyFunc.
 type cache struct {
 	// cacheStorage bears the burden of thread safety for the cache
-	cacheStorage ThreadSafeStore
+	cacheStorage ThreadSafeStore // 缓存表
 	// keyFunc is used to make the key for objects stored in and retrieved from items, and
 	// should be deterministic.
-	keyFunc KeyFunc
+	keyFunc KeyFunc // 用于从资源对象中构造唯一的key。该key与资源对象将会在缓存表中进行映射
 }
 
 var _ Store = &cache{}
 
 // Add inserts an item into the cache.
+// 将指定的对象添加到缓存中
 func (c *cache) Add(obj interface{}) error {
 	key, err := c.keyFunc(obj)
 	if err != nil {
@@ -153,6 +154,7 @@ func (c *cache) Add(obj interface{}) error {
 }
 
 // Update sets an item in the cache to its updated state.
+// 更新缓存中指定对象信息
 func (c *cache) Update(obj interface{}) error {
 	key, err := c.keyFunc(obj)
 	if err != nil {
@@ -163,6 +165,7 @@ func (c *cache) Update(obj interface{}) error {
 }
 
 // Delete removes an item from the cache.
+// 将对象从缓存中移除
 func (c *cache) Delete(obj interface{}) error {
 	key, err := c.keyFunc(obj)
 	if err != nil {
@@ -180,17 +183,20 @@ func (c *cache) List() []interface{} {
 
 // ListKeys returns a list of all the keys of the objects currently
 // in the cache.
+// 缓存中的对象索引列表
 func (c *cache) ListKeys() []string {
 	return c.cacheStorage.ListKeys()
 }
 
 // GetIndexers returns the indexers of cache
+// 缓存中的索引器列表。（索引器是除了key以外的其他快速定位一系列的方法)
 func (c *cache) GetIndexers() Indexers {
 	return c.cacheStorage.GetIndexers()
 }
 
 // Index returns a list of items that match on the index function
 // Index is thread-safe so long as you treat all items as immutable
+// 获取指定索引器
 func (c *cache) Index(indexName string, obj interface{}) ([]interface{}, error) {
 	return c.cacheStorage.Index(indexName, obj)
 }

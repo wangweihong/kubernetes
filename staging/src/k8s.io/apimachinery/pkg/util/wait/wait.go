@@ -77,7 +77,8 @@ func (g *Group) Start(f func()) {
 // Forever calls f every period for ever.
 //
 // Forever is syntactic sugar on top of Until.
-// 每隔period执行f，永不停止。先执行然后休眠计时器开始计时，即f执行时间不算在休眠计时中。
+// 每隔period执行f，永不停止。先执行然后倒计时开始计时，即f执行时间不算在倒计时中。
+// 如果period为0,那么当f函数执行结束，立即下次f执行循环
 func Forever(f func(), period time.Duration) {
 	Until(f, period, NeverStop)
 }
@@ -141,6 +142,8 @@ func JitterUntil(f func(), period time.Duration, jitterFactor float64, sliding b
 //
 // If sliding is true, the period is computed after f runs. If it is false then
 // period includes the runtime for f.
+// sliding用于在执行函数前，还是之后启动倒计时。 如果倒计时在函数执行之前，而函数执行周期超过倒计时期限，那么当函数执行完，倒计时立刻结束
+// 周期性执行函数，每次函数执行后将会重新计算执行周期。通过sliding来决定函数执行时间算不算在执行周期内。
 func BackoffUntil(f func(), backoff BackoffManager, sliding bool, stopCh <-chan struct{}) {
 	var t clock.Timer
 	for {
@@ -149,8 +152,8 @@ func BackoffUntil(f func(), backoff BackoffManager, sliding bool, stopCh <-chan 
 			return
 		default:
 		}
-
 		if !sliding {
+			// 创建一个倒计时
 			t = backoff.Backoff()
 		}
 
@@ -160,6 +163,7 @@ func BackoffUntil(f func(), backoff BackoffManager, sliding bool, stopCh <-chan 
 		}()
 		//计算下一次执行时间
 		if sliding {
+			// 创建一个倒计时
 			t = backoff.Backoff()
 		}
 
@@ -314,7 +318,7 @@ func contextForChannel(parentCh <-chan struct{}) (context.Context, context.Cance
 // undetermined behavior.
 // The BackoffManager is supposed to be called in a single-threaded environment.
 type BackoffManager interface {
-	// 启动一个定时器，在下次退避时间到来时唤醒
+	// 启动一个倒计时，在下次退避时间到来时唤醒
 	Backoff() clock.Timer
 }
 
@@ -402,13 +406,15 @@ func (j *jitteredBackoffManagerImpl) getNextBackoff() time.Duration {
 
 // Backoff implements BackoffManager.Backoff, it returns a timer so caller can block on the timer for jittered backoff.
 // The returned timer must be drained before calling Backoff() the second time
-// 启动一个定时器，在下次退避时间到来时唤醒
+// 启动一个倒计时，在下次退避时间到来时唤醒
 func (j *jitteredBackoffManagerImpl) Backoff() clock.Timer {
 	//计算出下一次退避时间(如果设置了误差，返回[duration: duration+jitter*duration]范围内的一个随机值)
 	backoff := j.getNextBackoff()
+	//创建一个新的倒计时
 	if j.backoffTimer == nil {
 		j.backoffTimer = j.clock.NewTimer(backoff)
 	} else {
+		//或者重置倒计时.(如果倒计时已经运行，不重置再次运行会导致panic)
 		j.backoffTimer.Reset(backoff)
 	}
 	return j.backoffTimer

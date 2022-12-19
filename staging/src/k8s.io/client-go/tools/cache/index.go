@@ -32,6 +32,7 @@ import (
 // 2. a name of an index, and
 // 3. an "indexed value", which is produced by an IndexFunc and
 //    can be a field value or any other string computed from the object.
+// 支持索引器的存储。
 type Indexer interface {
 	Store
 	// Index returns the stored objects whose set of indexed values
@@ -92,9 +93,13 @@ func MetaNamespaceIndexFunc(obj interface{}) ([]string, error) {
 }
 
 // Index maps the indexed value to a set of keys in the store that match on that value
+// 索引器的作用，用于快速定位一类对象的。如在某个缓存表中以UUID作为对象的索引，如果需要查找某个命名空间的对象,只能通过遍历所有
+// 对象来比对命名空间。但可以通过索引器，建立一个命名空间:UUID的索引，只需要找到对应的命名空间索引，就能会找到该命名空间
+// 下的一系列对象的UUID，再从UUID索引提取对象的具体信息。
 type Index map[string]sets.String
 
 // Indexers maps a name to a IndexFunc
+// 索引器列表
 type Indexers map[string]IndexFunc
 
 // Indices maps a name to an Index

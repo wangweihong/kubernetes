@@ -84,11 +84,11 @@ type syncPodOptions struct {
 	// pod to sync
 	pod *v1.Pod
 	// the type of update (create, update, sync)
-	updateType kubetypes.SyncPodType
+	updateType kubetypes.SyncPodType // 更新类型，包括sync,create,update,kill
 	// the current status
 	podStatus *kubecontainer.PodStatus
 	// if update type is kill, use the specified options to kill the pod.
-	killPodOptions *KillPodOptions
+	killPodOptions *KillPodOptions // 当更新类型为kill时，需要传该参数
 }
 
 // the function to invoke to perform a sync.
@@ -120,7 +120,7 @@ type podWorkers struct {
 	// undelivered if it comes in while the worker is working.
 	lastUndeliveredWorkUpdate map[types.UID]UpdatePodOptions
 
-	workQueue queue.WorkQueue
+	workQueue queue.WorkQueue //设置到期时间的工作队列
 
 	// This function is run to sync the desired stated of pod.
 	// NOTE: This function has to be thread-safe - it can be called for
@@ -131,10 +131,10 @@ type podWorkers struct {
 	recorder record.EventRecorder
 
 	// backOffPeriod is the duration to back off when there is a sync error.
-	backOffPeriod time.Duration
+	backOffPeriod time.Duration // 默认10秒钟
 
 	// resyncInterval is the duration to wait until the next sync.
-	resyncInterval time.Duration
+	resyncInterval time.Duration // 默认1分钟, 可以通过配置来设置
 
 	// podCache stores kubecontainer.PodStatus for all pods.
 	podCache kubecontainer.Cache
@@ -157,6 +157,7 @@ func newPodWorkers(syncPodFn syncPodFnType, recorder record.EventRecorder, workQ
 
 func (p *podWorkers) managePodLoop(podUpdates <-chan UpdatePodOptions) {
 	var lastSyncTime time.Time
+	// 当Pod有更新时
 	for update := range podUpdates {
 		err := func() error {
 			podUID := update.Pod.UID
@@ -260,17 +261,21 @@ func (p *podWorkers) ForgetNonExistingPodWorkers(desiredPods map[types.UID]sets.
 	}
 }
 
+// 将指定ID加入工作队列，并根据同步错误信息设置就绪时间
 func (p *podWorkers) wrapUp(uid types.UID, syncErr error) {
 	// Requeue the last update if the last sync returned error.
 	switch {
 	case syncErr == nil:
 		// No error; requeue at the regular resync interval.
+		// 将指定pod uid插入到工作队列中，过期时间为1-1.5分钟之间的随机值
 		p.workQueue.Enqueue(uid, wait.Jitter(p.resyncInterval, workerResyncIntervalJitterFactor))
 	case strings.Contains(syncErr.Error(), NetworkNotReadyErrorMsg):
 		// Network is not ready; back off for short period of time and retry as network might be ready soon.
+		// 将指定pod uid插入到工作队列中，过期时间为1-1.5秒之间的随机值
 		p.workQueue.Enqueue(uid, wait.Jitter(backOffOnTransientErrorPeriod, workerBackOffPeriodJitterFactor))
 	default:
 		// Error occurred during the sync; back off and then retry.
+		// 将指定pod uid插入到工作队列中，过期时间为10-15秒之间的随机值
 		p.workQueue.Enqueue(uid, wait.Jitter(p.backOffPeriod, workerBackOffPeriodJitterFactor))
 	}
 	p.checkForUpdates(uid)
